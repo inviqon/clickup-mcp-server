@@ -263,6 +263,22 @@ describe('clickup_search_tasks', () => {
     expect(out.items.map((t: { id: string }) => t.id).sort()).toEqual(['9hx', '9hy'])
   })
 
+  it('carries priority and assignees on each matched task, and omits priority when a task has none', async () => {
+    mswServer.use(...fx.searchHandlersWithPriority())
+    const out = await tool('clickup_search_tasks').handler({ query: 'release' }, testContext())
+    const withPriority = out.items.find((t: { id: string }) => t.id === '869etjckr')
+    expect(withPriority.priority).toBe('high')
+    expect(withPriority.assignees).toEqual([{ id: '152549938', username: 'Tiemo Timtschenko' }])
+
+    const withoutPriority = out.items.find((t: { id: string }) => t.id === '869etjby7')
+    expect(withoutPriority).not.toHaveProperty('priority')
+    expect(withoutPriority.assignees).toEqual([{ id: '152549938', username: 'Tiemo Timtschenko' }])
+
+    const md = tool('clickup_search_tasks').render(out, testContext())
+    expect(md).toContain('(high)')
+    expect(md).toContain('Tiemo Timtschenko')
+  })
+
   it('formats due_date with the configured timezone offset, not raw epoch ms or a bare UTC ISO string (Finding B)', async () => {
     mswServer.use(...fx.searchHandlers())
     const out = await tool('clickup_search_tasks').handler({ query: 'login bug' }, testContext())

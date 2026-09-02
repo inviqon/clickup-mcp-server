@@ -300,8 +300,11 @@ export const searchTasksTool: ToolDefinition<typeof searchTasksInputShape, typeo
       '',
       ...out.items.map(
         (t) =>
-          `- ${nameWithId(t.name, t.id)} [${t.status}] - ${nameWithId(t.list_name, t.list_id)}${
-            t.due_date ? ` - due ${t.due_date}` : ''
+          `- ${nameWithId(t.name, t.id)} [${t.status}]${t.priority ? ` (${t.priority})` : ''} - ${nameWithId(
+            t.list_name,
+            t.list_id,
+          )}${t.due_date ? ` - due ${t.due_date}` : ''}${
+            t.assignees && t.assignees.length > 0 ? ` - ${t.assignees.map((a) => a.username).join(', ')}` : ''
           }`,
       ),
     ].join('\n')

@@ -147,7 +147,7 @@ Find ClickUp tasks across the whole workspace by matching text against each task
 - `total`: number
 - `count`: number
 - `offset`: number
-- `items`: array of object {id, name, status, list_id, list_name, url, due_date}
+- `items`: array of object {id, name, status, priority, assignees, list_id, list_name, url, due_date}
 - `has_more`: boolean
 - `next_offset`: number (optional)
 - `bounded`: boolean (optional)
@@ -224,7 +224,7 @@ List tasks in one list or space, filtered by status, assignee, tag or due date -
 - `total`: number
 - `count`: number
 - `offset`: number
-- `items`: array of object {id, name, status, list_id, list_name, url, due_date}
+- `items`: array of object {id, name, status, priority, assignees, list_id, list_name, url, due_date}
 - `has_more`: boolean
 - `next_offset`: number (optional)
 - `bounded`: boolean (optional)
@@ -1081,9 +1081,9 @@ One-call daily briefing: the currently running timer, time already tracked today
 - `running_timer_error`: string (optional)
 - `tracked_today`: object {total, entries} (optional)
 - `tracked_today_error`: string (optional)
-- `due_today`: array of object {id, name, status, list_id, list_name, url, due_date} (optional)
+- `due_today`: array of object {id, name, status, priority, assignees, list_id, list_name, url, due_date} (optional)
 - `due_today_error`: string (optional)
 - `due_today_bounded`: boolean (optional)
-- `overdue`: array of object {id, name, status, list_id, list_name, url, due_date} (optional)
+- `overdue`: array of object {id, name, status, priority, assignees, list_id, list_name, url, due_date} (optional)
 - `overdue_error`: string (optional)
 - `overdue_bounded`: boolean (optional)

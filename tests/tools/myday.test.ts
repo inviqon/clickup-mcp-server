@@ -21,6 +21,38 @@ describe('clickup_get_my_day', () => {
     expect(out.overdue).toHaveLength(1)
   })
 
+  it('carries priority and assignees on due-today tasks, and omits priority when a task has none', async () => {
+    mswServer.use(
+      ...fx.myDayHandlers({
+        dueToday: [
+          {
+            id: '869etjckr',
+            name: 'Ship the release',
+            priority: 'high',
+            assignees: [{ id: 152549938, username: 'Tiemo Timtschenko' }],
+          },
+          {
+            id: '869etjby7',
+            name: 'Write release notes',
+            assignees: [{ id: 152549938, username: 'Tiemo Timtschenko' }],
+          },
+        ],
+      }),
+    )
+    const out = await tool('clickup_get_my_day').handler({}, testContext())
+    const withPriority = out.due_today.find((t: { id: string }) => t.id === '869etjckr')
+    expect(withPriority.priority).toBe('high')
+    expect(withPriority.assignees).toEqual([{ id: '152549938', username: 'Tiemo Timtschenko' }])
+
+    const withoutPriority = out.due_today.find((t: { id: string }) => t.id === '869etjby7')
+    expect(withoutPriority).not.toHaveProperty('priority')
+    expect(withoutPriority.assignees).toEqual([{ id: '152549938', username: 'Tiemo Timtschenko' }])
+
+    const md = tool('clickup_get_my_day').render(out, testContext())
+    expect(md).toContain('(high)')
+    expect(md).toContain('Tiemo Timtschenko')
+  })
+
   it('renders a section per area and omits an empty section entirely', async () => {
     mswServer.use(...fx.myDayHandlers({ overdue: [] }))
     const out = await tool('clickup_get_my_day').handler({}, testContext())

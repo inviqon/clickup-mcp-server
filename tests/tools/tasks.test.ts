@@ -123,6 +123,27 @@ describe('clickup_list_tasks', () => {
     expect(noDue).not.toHaveProperty('due_date')
   })
 
+  it('carries priority and assignees on each task summary, and omits priority when a task has none', async () => {
+    mswServer.use(...fx.listTasksWithPriorityHandlers())
+    const out = await tool('clickup_list_tasks').handler({ list_id: '100' }, testContext())
+    const items = out.items as Array<{
+      id: string
+      priority?: string
+      assignees?: Array<{ id: string; username: string }>
+    }>
+    const withPriority = items.find((t) => t.id === '869etjckr')
+    expect(withPriority?.priority).toBe('high')
+    expect(withPriority?.assignees).toEqual([{ id: '152549938', username: 'Tiemo Timtschenko' }])
+
+    const withoutPriority = items.find((t) => t.id === '869etjby7')
+    expect(withoutPriority).not.toHaveProperty('priority')
+    expect(withoutPriority?.assignees).toEqual([{ id: '152549938', username: 'Tiemo Timtschenko' }])
+
+    const md = tool('clickup_list_tasks').render(out, testContext())
+    expect(md).toContain('(high)')
+    expect(md).toContain('Tiemo Timtschenko')
+  })
+
   it('reports an empty result naming the scope that produced it', async () => {
     mswServer.use(...fx.listTasksHandlers({ empty: true }))
     const out = await tool('clickup_list_tasks').handler({ list_id: '100' }, testContext())

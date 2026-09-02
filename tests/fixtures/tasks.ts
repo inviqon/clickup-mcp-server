@@ -459,6 +459,44 @@ export function listTasksHandlers(opts: { empty?: boolean } = {}) {
   ]
 }
 
+/**
+ * Real workspace shape (task ids 869etjckr/869etjby7, assignee id
+ * 152549938), used to prove `priority`/`assignees` actually reach
+ * `clickup_list_tasks`'s output rather than only the shared schema/endpoint
+ * layer both TASK_100_A/TASK_100_B above never exercise. TASK_WITH_PRIORITY
+ * carries both fields; TASK_NO_PRIORITY carries the same assignee but no
+ * priority, so the omission (not just the presence) is exercised too.
+ */
+const TASK_WITH_PRIORITY = {
+  id: '869etjckr',
+  name: 'Ship the release',
+  status: { status: 'in progress', color: '#a875ff', orderindex: 1, type: 'custom' },
+  priority: { color: '#f8ae00', id: '2', orderindex: '2', priority: 'high' },
+  assignees: [{ id: 152549938, username: 'Tiemo Timtschenko', color: '#7b68ee', initials: 'TT', profilePicture: null }],
+  due_date: null,
+  url: 'https://app.clickup.com/t/869etjckr',
+  list: { id: LIST_ID, name: 'Sprint 1', access: true },
+}
+
+const TASK_NO_PRIORITY = {
+  id: '869etjby7',
+  name: 'Write release notes',
+  status: { status: 'open', color: '#d3d3d3', orderindex: 0, type: 'open' },
+  priority: null,
+  assignees: [{ id: 152549938, username: 'Tiemo Timtschenko', color: '#7b68ee', initials: 'TT', profilePicture: null }],
+  due_date: null,
+  url: 'https://app.clickup.com/t/869etjby7',
+  list: { id: LIST_ID, name: 'Sprint 1', access: true },
+}
+
+export function listTasksWithPriorityHandlers() {
+  const tasks = [TASK_WITH_PRIORITY, TASK_NO_PRIORITY]
+  return [
+    http.get(`${API}/v2/list/${LIST_ID}/task`, () => HttpResponse.json({ tasks })),
+    http.get(`${API}/v2/team/${TEAM_ID}/task`, () => HttpResponse.json({ tasks })),
+  ]
+}
+
 function pageTaskFixture(id: string) {
   return {
     id,

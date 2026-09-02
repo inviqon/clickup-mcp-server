@@ -25,7 +25,20 @@ const AUTH_USER = { id: 501, username: 'Alice Anderson', email: 'alice@example.c
 
 const RUNNING_USER = { id: 501, username: 'Alice Anderson', email: 'alice@example.com', color: '#7b68ee', initials: 'AA', profilePicture: null }
 
-function dueTodayTask(id: string, name: string) {
+/**
+ * `opts.priority`/`opts.assignees` model the same ground-truth workspace
+ * shape `listTasksWithPriorityHandlers` (tests/fixtures/tasks.ts) and
+ * `searchHandlersWithPriority` (tests/fixtures/workspace.ts) use - task id
+ * 869etjckr with priority "high" and assignee 152549938 ("Tiemo
+ * Timtschenko") - so `clickup_get_my_day`'s own use of `toTaskSummary` is
+ * proven independently of the other two tools that share it, rather than
+ * assumed from their passing.
+ */
+function dueTodayTask(
+  id: string,
+  name: string,
+  opts: { priority?: string | undefined; assignees?: Array<{ id: number; username: string }> | undefined } = {},
+) {
   return {
     id,
     name,
@@ -33,6 +46,10 @@ function dueTodayTask(id: string, name: string) {
     due_date: '1757030000000',
     url: `https://app.clickup.com/t/${id}`,
     list: { id: '100', name: 'Sprint 1', access: true },
+    ...(opts.priority !== undefined
+      ? { priority: { color: '#f8ae00', id: '2', orderindex: '2', priority: opts.priority } }
+      : {}),
+    ...(opts.assignees !== undefined ? { assignees: opts.assignees } : {}),
   }
 }
 
@@ -51,6 +68,12 @@ export type MyDayHandlerOpts = {
   /** `null` for "confirmed nothing running"; an object to name a running task; omit for the default running task. */
   running?: null | { taskId: string; taskName: string }
   overdue?: Array<{ id: string; name: string }>
+  /**
+   * Overrides the two default due-today tasks. Present so a test can carry
+   * a real priority/assignees pair (see `dueTodayTask`'s own doc comment)
+   * without disturbing the default fixture every other test relies on.
+   */
+  dueToday?: Array<{ id: string; name: string; priority?: string; assignees?: Array<{ id: number; username: string }> }>
   overdueFails?: boolean
   dueTodayFails?: boolean
   trackedFails?: boolean
@@ -160,8 +183,12 @@ export function myDayHandlers(opts: MyDayHandlerOpts = {}) {
         if (opts.dueTodayFails) {
           return HttpResponse.json({ err: 'Server error', ECODE: 'SRV_001' }, { status: 500 })
         }
+        const dueTodayTasks = opts.dueToday ?? [
+          { id: '86due1', name: 'Ship the release' },
+          { id: '86due2', name: 'Write release notes' },
+        ]
         return HttpResponse.json({
-          tasks: [dueTodayTask('86due1', 'Ship the release'), dueTodayTask('86due2', 'Write release notes')],
+          tasks: dueTodayTasks.map((t) => dueTodayTask(t.id, t.name, { priority: t.priority, assignees: t.assignees })),
         })
       }
 

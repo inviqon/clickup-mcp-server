@@ -309,7 +309,10 @@ export const listTasksTool: ToolDefinition<typeof listTasksInputShape, typeof li
         : []),
       '',
       ...out.items.map(
-        (t) => `- ${nameWithId(t.name, t.id)} [${t.status}]${t.due_date ? ` - due ${t.due_date}` : ''}`,
+        (t) =>
+          `- ${nameWithId(t.name, t.id)} [${t.status}]${t.priority ? ` (${t.priority})` : ''}${
+            t.due_date ? ` - due ${t.due_date}` : ''
+          }${t.assignees && t.assignees.length > 0 ? ` - ${t.assignees.map((a) => a.username).join(', ')}` : ''}`,
       ),
     ].join('\n')
   },

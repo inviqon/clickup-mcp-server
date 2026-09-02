@@ -31,6 +31,8 @@ export type MyDayTaskOut = {
   id: string
   name: string
   status: string
+  priority?: string | undefined
+  assignees?: Array<{ id: string; username: string }> | undefined
   list_id: string
   list_name: string
   url: string
@@ -53,7 +55,9 @@ export type MyDayOut = {
 }
 
 function renderTaskLine(t: MyDayTaskOut): string {
-  return `- ${nameWithId(t.name, t.id)} [${t.status}]${t.due_date !== undefined ? ` - due ${t.due_date}` : ''}`
+  return `- ${nameWithId(t.name, t.id)} [${t.status}]${t.priority !== undefined ? ` (${t.priority})` : ''}${
+    t.due_date !== undefined ? ` - due ${t.due_date}` : ''
+  }${t.assignees !== undefined && t.assignees.length > 0 ? ` - ${t.assignees.map((a) => a.username).join(', ')}` : ''}`
 }
 
 /**

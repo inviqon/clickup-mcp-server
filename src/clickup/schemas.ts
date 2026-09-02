@@ -189,6 +189,39 @@ export const TaskListRefSchema = z
   })
   .passthrough()
 
+/**
+ * Declared here, ahead of `TaskSchema` below, rather than down with the
+ * rest of the "Task-domain schemas" block further down this file: `TaskSchema`
+ * now reuses both for its own (optional) `priority`/`assignees` fields, and
+ * a `const` must be declared before the object literal that references it.
+ * Reusing them rather than redeclaring the same shape inline is the same
+ * consolidation this file's own history already applies elsewhere (see the
+ * removed duplicate `CommentSchema` note on `CreateCommentResponseSchema`
+ * below) - one definition of what a priority or an assignee looks like,
+ * not two that can silently drift.
+ */
+export const TaskPrioritySchema = z
+  .object({
+    priority: z.string(),
+  })
+  .passthrough()
+
+export const TaskAssigneeSchema = z
+  .object({
+    id: zId,
+    username: z.string(),
+  })
+  .passthrough()
+
+/**
+ * `priority` and `assignees` are both declared optional/defaulted, exactly
+ * as `TaskDetailSchema` declares them below: a task genuinely can have
+ * neither, and ClickUp reports that as `priority: null` and `assignees: []`
+ * respectively, never by omitting the keys. Added so `toTaskSummary`
+ * (src/clickup/endpoints/tasks.ts) can carry both onto the compact summary
+ * shape every list/search tool shares, matching what the vendor's own
+ * equivalent already returns.
+ */
 export const TaskSchema = z
   .object({
     id: z.string(),
@@ -196,6 +229,8 @@ export const TaskSchema = z
     description: z.string().nullable().optional(),
     text_content: z.string().nullable().optional(),
     status: TaskStatusSchema,
+    priority: TaskPrioritySchema.nullable().optional(),
+    assignees: z.array(TaskAssigneeSchema).default([]),
     url: z.string(),
     due_date: z.string().nullable().optional(),
     list: TaskListRefSchema,
@@ -220,30 +255,20 @@ export const GetTasksResponseSchema = z
 
 /**
  * Task-domain schemas for the eight task tools (Task 11). Kept separate from
- * the lighter `TaskSchema` above, which is deliberately minimal because it
- * only backs workspace-wide search and listing. These schemas back the
+ * the lighter `TaskSchema` above, which only backs workspace-wide search and
+ * listing and so still omits most of what these schemas add (tags, custom
+ * field values, subtasks) - `priority` and `assignees` are the two fields
+ * `TaskSchema` now also carries, via `TaskPrioritySchema`/`TaskAssigneeSchema`
+ * above, so a task summary is not left one `clickup_get_task` call away from
+ * answering who owns it and how urgent it is. These schemas back the
  * single-task read/write endpoints, which report considerably more of the
- * task (priority, tags, assignees, custom field values, subtasks), all
- * sourced from ClickUp's GET/POST/PUT task reference pages linked from
- * developer.clickup.com/docs/open-api-spec.md.
+ * task, all sourced from ClickUp's GET/POST/PUT task reference pages linked
+ * from developer.clickup.com/docs/open-api-spec.md.
  */
-
-export const TaskPrioritySchema = z
-  .object({
-    priority: z.string(),
-  })
-  .passthrough()
 
 export const TaskTagSchema = z
   .object({
     name: z.string(),
-  })
-  .passthrough()
-
-export const TaskAssigneeSchema = z
-  .object({
-    id: zId,
-    username: z.string(),
   })
   .passthrough()
 
@@ -360,16 +385,26 @@ export type TaskDetail = z.infer<typeof TaskDetailSchema>
 
 /**
  * The normalised task summary shape shared by every tool that returns a
- * list of tasks rather than one task in full (`clickup_list_tasks`, and the
- * `succeeded`/bulk-adjacent views in later tasks). Exported as a zod schema,
- * not just a TypeScript type, so a consuming tool can build its own
- * `outputSchema` as `z.array(TaskSummarySchema)` without redeclaring the
- * shape - the same role `TaskDetailSchema` plays for a single task.
+ * list of tasks rather than one task in full (`clickup_list_tasks`,
+ * `clickup_search_tasks` and `clickup_get_my_day`'s `due_today`/`overdue`).
+ * Exported as a zod schema, not just a TypeScript type, so a consuming tool
+ * can build its own `outputSchema` as `z.array(TaskSummarySchema)` without
+ * redeclaring the shape - the same role `TaskDetailSchema` plays for a
+ * single task.
+ *
+ * `priority` and `assignees` mirror `TaskOut`'s own fields of the same name
+ * (src/clickup/endpoints/tasks.ts): both optional, both omitted rather than
+ * rendered as null/empty when ClickUp reports no priority or no assignee,
+ * per reliability rule 2. Added so "which of these is urgent, and who owns
+ * it" does not cost one `clickup_get_task` per row - the vendor's own
+ * equivalent already returns both on its list view.
  */
 export const TaskSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   status: z.string(),
+  priority: z.string().optional(),
+  assignees: z.array(z.object({ id: z.string(), username: z.string() })).optional(),
   list_id: z.string(),
   list_name: z.string(),
   url: z.string(),

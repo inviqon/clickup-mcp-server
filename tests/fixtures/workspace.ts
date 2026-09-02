@@ -308,6 +308,51 @@ export function searchHandlers(opts: { empty?: boolean } = {}) {
   ]
 }
 
+/**
+ * Real workspace shape (task ids 869etjckr/869etjby7, assignee id
+ * 152549938 - "Tiemo Timtschenko"), used to prove `clickup_search_tasks`
+ * carries `priority`/`assignees` through its own text-matching path, not
+ * only the shared schema/endpoint layer `listTasksWithPriorityHandlers`
+ * (tests/fixtures/tasks.ts) already exercises for `clickup_list_tasks`.
+ * TASK_RELEASE_HIGH carries both; TASK_RELEASE_NO_PRIORITY carries the
+ * same assignee but no priority.
+ */
+const TASK_RELEASE_HIGH = {
+  id: '869etjckr',
+  custom_id: null,
+  name: 'Ship the release',
+  text_content: '',
+  description: '',
+  status: { status: 'in progress', color: '#a875ff', orderindex: 1, type: 'custom' },
+  priority: { color: '#f8ae00', id: '2', orderindex: '2', priority: 'high' },
+  assignees: [{ id: 152549938, username: 'Tiemo Timtschenko', color: '#7b68ee', initials: 'TT', profilePicture: null }],
+  due_date: null,
+  url: 'https://app.clickup.com/t/869etjckr',
+  list: { id: FOLDERLESS_LIST_ID, name: 'Backlog', access: true },
+}
+
+const TASK_RELEASE_NO_PRIORITY = {
+  id: '869etjby7',
+  custom_id: null,
+  name: 'Write release notes',
+  text_content: '',
+  description: '',
+  status: { status: 'to do', color: '#f8ae00', orderindex: 0, type: 'open' },
+  priority: null,
+  assignees: [{ id: 152549938, username: 'Tiemo Timtschenko', color: '#7b68ee', initials: 'TT', profilePicture: null }],
+  due_date: null,
+  url: 'https://app.clickup.com/t/869etjby7',
+  list: { id: FOLDERLESS_LIST_ID, name: 'Backlog', access: true },
+}
+
+export function searchHandlersWithPriority() {
+  return [
+    http.get(`${API}/v2/team/${TEAM_ID}/task`, () =>
+      HttpResponse.json({ tasks: [TASK_RELEASE_HIGH, TASK_RELEASE_NO_PRIORITY] }),
+    ),
+  ]
+}
+
 function pageFromRequest(request: Request): number {
   return Number(new URL(request.url).searchParams.get('page') ?? '0')
 }

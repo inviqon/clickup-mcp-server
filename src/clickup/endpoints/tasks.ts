@@ -381,6 +381,13 @@ export function toTaskOut(task: TaskDetail, ctx: ClickUpContext): TaskOut {
  * unformatted just because it came through the list/summary path instead
  * of the single-task path. Both must show the same value the same way for
  * the same task.
+ *
+ * `priority` and `assignees` are omitted exactly the way `toTaskOut` omits
+ * them (`task.priority`'s null/undefined check; `task.assignees.length > 0`)
+ * - a task with neither must render with neither line, not an empty or
+ * null one. Reusing that same omission rule here, rather than inventing a
+ * second one for the summary shape, is the whole reason to keep this
+ * function reading `toTaskOut` right above it.
  */
 export function toTaskSummary(task: Task, timezone: string): TaskSummary {
   const due = formatMsField(task.due_date, timezone)
@@ -388,6 +395,10 @@ export function toTaskSummary(task: Task, timezone: string): TaskSummary {
     id: task.id,
     name: task.name,
     status: task.status.status,
+    ...(task.priority !== null && task.priority !== undefined ? { priority: task.priority.priority } : {}),
+    ...(task.assignees.length > 0
+      ? { assignees: task.assignees.map((a) => ({ id: a.id, username: a.username })) }
+      : {}),
     list_id: task.list.id,
     list_name: task.list.name,
     url: task.url,
