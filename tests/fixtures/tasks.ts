@@ -704,8 +704,8 @@ export function taskTimeInStatusHandlers() {
  * Same endpoint, a task that has never changed status: `current_status` is
  * real (the task has genuinely been "open" for zero minutes since
  * creation) and `status_history` is a genuinely empty array - distinct from
- * the disabled-ClickApp case below, which is not a valid, empty response
- * but a shapeless one.
+ * the shapeless-response case below, which is not a valid, empty response
+ * but a malformed one.
  */
 export function taskTimeInStatusNoHistoryHandlers() {
   return [
@@ -724,9 +724,9 @@ export function taskTimeInStatusNoHistoryHandlers() {
  * genuinely uses elsewhere for a value it does not (yet) have (see
  * `ListDetailSchema.task_count`/`TaskDetailSchema.time_estimate`). This
  * must parse and render as an ordinary, well-shaped response with no since
- * line - not as the shapeless/disabled-ClickApp case below, which the
- * increment review flagged as exactly the failure this schema must not
- * produce for a genuinely valid response.
+ * line - not as the shapeless-response case below, which the increment
+ * review flagged as exactly the failure this schema must not produce for a
+ * genuinely valid response.
  */
 export function taskTimeInStatusNullSinceHandlers() {
   return [
@@ -741,15 +741,19 @@ export function taskTimeInStatusNullSinceHandlers() {
 
 /**
  * A 200 response that is valid JSON but does not carry the
- * current_status/status_history shape this server requires. ClickUp's own
- * reference documents only that the "Total time in Status" ClickApp "must
- * first be enabled by the Workspace owner or an admin" - it does not
- * document what the endpoint actually returns when it is not, and no
- * ECODE or error status for this specific case could be found or verified
- * (see the increment report). Modelled here as the safest assumption this
- * server can act on without inventing a shape that has not been verified:
- * a 200 with an empty body, rather than a specific error code this project
- * cannot confirm.
+ * current_status/status_history shape this server requires - the residual
+ * "shapeless response" case `TaskTimeInStatusResponseSchema`
+ * (src/clickup/schemas.ts) exists to guard against.
+ *
+ * Named for the scenario this project originally modelled it on - a
+ * workspace whose "Total time in Status" ClickApp is disabled - but that
+ * specific case is now known (live testing) to surface as an explicit
+ * ClickUp HTTP error instead (403, "Time In Status is not available on
+ * your plan"; see `tests/core/errors.test.ts` and `tests/clickup/
+ * client.test.ts`), not as a shapeless 200 like this fixture. Kept as a
+ * generic "malformed 2xx body, cause otherwise unconfirmed" fixture: a 200
+ * with an empty body, exercising the schema-validation guard without
+ * inventing a shape ClickUp has not been observed to send.
  */
 export function taskTimeInStatusDisabledClickAppHandlers() {
   return [http.get(`${API}/v2/task/${TASK_ID}/time_in_status`, () => HttpResponse.json({}))]

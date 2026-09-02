@@ -418,17 +418,20 @@ export type TaskSummary = z.infer<typeof TaskSummarySchema>
  * `GET /task/{task_id}/time_in_status` or its bulk variant. `status` and
  * `total_time.by_minute` are both REQUIRED here (not `.nullable()` or
  * `.optional()`), unlike most schemas in this file, which lean permissive.
- * That is deliberate: ClickUp's own reference page documents that the
- * "Total time in Status" ClickApp "must first be enabled by the Workspace
- * owner or an admin" but does not document what the endpoint actually
- * returns when it is not - no ECODE, no distinct HTTP status, nothing
- * verified (see the increment report). A strict schema turns any response
- * that does not carry a real status/by_minute pair into a schema-validation
- * failure rather than a value that silently defaults to `0` -
+ * That is deliberate, though the reason has narrowed since this schema was
+ * first written: a live workspace whose plan does not include "Total time
+ * in Status" does not reach this schema at all - ClickUp rejects the
+ * request outright with an HTTP error (observed live: 403, "Time In Status
+ * is not available on your plan"), caught and surfaced at the client/error
+ * layer before any body is ever parsed against this schema (see
+ * `clickup/client.ts` and `core/errors.ts`). What this strict schema
+ * guards is the remaining case: a 2xx response that, for some other
+ * reason, does not carry a real status/by_minute pair. A response that
+ * fails this schema must still not silently default to `0` -
  * `getTaskTimeInStatusRaw`/`getTasksTimeInStatusBulkRaw`
- * (src/clickup/endpoints/tasks.ts) treat exactly that failure as "cannot
- * tell whether the ClickApp is enabled" and say so explicitly, rather than
- * ever rendering a confident "0m".
+ * (src/clickup/endpoints/tasks.ts) turn exactly that failure into an
+ * explicit "cannot report time in status" error naming the gap, rather
+ * than ever rendering a confident "0m".
  *
  * `total_time.since`, by contrast, IS `.nullable()` (in addition to
  * `.optional()`) - the same pattern `ListDetailSchema.task_count` and
@@ -437,7 +440,7 @@ export type TaskSummary = z.infer<typeof TaskSummarySchema>
  * it required-non-null would have made a real ClickUp response (current
  * status/history genuinely present, `since` merely not yet known) fail the
  * same strict parse that `status`/`by_minute` deliberately do fail on a
- * shapeless response - turning a CORRECT answer into the disabled-ClickApp
+ * shapeless response - turning a CORRECT answer into the shapeless-response
  * error this schema exists to guard against, exactly the failure mode the
  * increment review flagged. `toTimeInStatusPeriodOut`
  * (src/clickup/endpoints/tasks.ts) treats `null` the same as absent: no

@@ -451,17 +451,17 @@ export async function resolveCustomFields(
 // -- Time in status ---------------------------------------------------------
 
 /**
- * The message every "cannot tell whether the ClickApp is enabled" case uses
- * (C1 and C2 both). Deliberately does NOT claim the ClickApp is definitely
- * disabled: ClickUp's own reference page for both endpoints states only
- * that the "Total time in Status" ClickApp "must first be enabled by the
- * Workspace owner or an admin" - it documents no error response, ECODE, or
- * distinct HTTP status for the disabled case, and none could be found or
- * verified elsewhere (see the increment report). A shapeless or missing
- * response is the most likely symptom of that, but this server cannot
- * confirm it is the only possible cause, so the message says exactly that -
- * an honest "cannot tell", never a confident diagnosis, and never a silent
- * "0m".
+ * The message every schema-mismatch ("shapeless" or "missing") case uses
+ * (C1 and C2 both). This is deliberately NOT the message for "this
+ * workspace's plan does not include Total time in Status" - that case
+ * surfaces as an explicit ClickUp HTTP error (observed live: 403, "Time In
+ * Status is not available on your plan"), caught and formatted at the
+ * client/error layer (`clickup/client.ts`, `core/errors.ts`) before a body
+ * is ever parsed against `TaskTimeInStatusResponseSchema`, so it never
+ * reaches this function. What lands here is a 2xx response that, for some
+ * other reason, does not carry the shape this server requires (or omits the
+ * task's entry entirely) - a genuinely unconfirmed cause, so the message
+ * says exactly that rather than guessing, and never reports a silent "0m".
  */
 function timeInStatusUnavailableMessage(taskId: string, reason: 'shapeless' | 'missing'): string {
   const what =
@@ -470,24 +470,28 @@ function timeInStatusUnavailableMessage(taskId: string, reason: 'shapeless' | 'm
         'total_time.by_minute) this server requires'
       : "ClickUp's response did not mention it at all"
   return (
-    `Time in status is not available for task ${taskId}: ${what}. This usually means the "Total time in Status" ` +
-    'ClickApp is not enabled for this workspace - it must be turned on by a Workspace owner or admin - but ' +
-    'ClickUp does not document what it returns when that ClickApp is disabled, so this could also be some other ' +
-    'unexpected condition (for "not mentioned at all": the id may also not exist, or not be visible to this ' +
-    'token). Either way, time in status cannot be reported for this task here - treat it as unknown, never as 0m.'
+    `Time in status is not available for task ${taskId}: ${what}. A workspace whose plan does not include ` +
+    '"Total time in Status" gets an explicit ClickUp error instead of reaching this point, so this has some ' +
+    'other cause - most likely a malformed or unexpected response shape (for "not mentioned at all": the id ' +
+    'may also not exist, or not be visible to this token). Either way, time in status cannot be reported for ' +
+    'this task here - treat it as unknown, never as 0m.'
   )
 }
 
 /**
- * `GET /task/{task_id}/time_in_status`. Requires the "Total time in Status"
- * ClickApp to be enabled for the workspace; `TaskTimeInStatusResponseSchema`
- * requires `current_status`/`status_history` to carry a real numeric
- * `total_time.by_minute`, so a response that does not (the shapeless case
- * this server cannot otherwise distinguish from a disabled ClickApp) fails
- * schema validation inside `ctx.client.request` as a `ClickUpSchemaError` -
- * caught here specifically and re-thrown as a `ClickUpUsageError` so the
- * message reaches the agent unwrapped (see `core/errors.ts`) rather than as
- * a generic schema-validation complaint.
+ * `GET /task/{task_id}/time_in_status`. Requires a ClickUp plan that
+ * includes "Total time in Status"; on a plan without it ClickUp rejects the
+ * request itself with an HTTP error (observed live: 403, "Time In Status is
+ * not available on your plan"), which `ctx.client.request` turns into a
+ * `ClickUpApiError` carrying that message (see `core/errors.ts`) - this
+ * function does not intercept that case. What it does catch:
+ * `TaskTimeInStatusResponseSchema` requires `current_status`/`status_history`
+ * to carry a real numeric `total_time.by_minute`, so a 2xx response that
+ * does not (a shapeless response, cause otherwise unconfirmed) fails schema
+ * validation inside `ctx.client.request` as a `ClickUpSchemaError` - caught
+ * here specifically and re-thrown as a `ClickUpUsageError` so the message
+ * reaches the agent unwrapped (see `core/errors.ts`) rather than as a
+ * generic schema-validation complaint.
  */
 export async function getTaskTimeInStatusRaw(ctx: ClickUpContext, taskId: string): Promise<TaskTimeInStatusResponse> {
   try {
