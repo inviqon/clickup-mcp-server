@@ -193,3 +193,134 @@ export const GetTasksResponseSchema = z
     tasks: z.array(TaskSchema),
   })
   .passthrough()
+
+/**
+ * Task-domain schemas for the eight task tools (Task 11). Kept separate from
+ * the lighter `TaskSchema` above, which is deliberately minimal because it
+ * only backs workspace-wide search and listing. These schemas back the
+ * single-task read/write endpoints, which report considerably more of the
+ * task (priority, tags, assignees, custom field values, subtasks), all
+ * sourced from ClickUp's GET/POST/PUT task reference pages linked from
+ * developer.clickup.com/docs/open-api-spec.md.
+ */
+
+export const TaskPrioritySchema = z
+  .object({
+    priority: z.string(),
+  })
+  .passthrough()
+
+export const TaskTagSchema = z
+  .object({
+    name: z.string(),
+  })
+  .passthrough()
+
+export const TaskAssigneeSchema = z
+  .object({
+    id: zId,
+    username: z.string(),
+  })
+  .passthrough()
+
+/**
+ * `value` is deliberately `z.unknown()`: a custom field's value shape
+ * depends entirely on the field's `type` (a string for text fields, a
+ * number for number fields, an array of option ids for a multi-select,
+ * ...), and this server never interprets that value itself - it is read
+ * back and rendered verbatim, never computed on.
+ */
+export const TaskCustomFieldValueSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    value: z.unknown().optional(),
+  })
+  .passthrough()
+
+/**
+ * A subtask as ClickUp nests it inside a parent task's `subtasks` array
+ * (present only when the parent was fetched with `include_subtasks=true`).
+ * Deliberately narrow - just enough to render a subtask compactly - rather
+ * than reusing `TaskDetailSchema`, which would demand fields (`list`, `url`)
+ * ClickUp does not actually nest on a subtask entry.
+ */
+export const SubtaskSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    status: TaskStatusSchema,
+  })
+  .passthrough()
+
+export const CommentAuthorSchema = z
+  .object({
+    id: zId,
+    username: z.string(),
+  })
+  .passthrough()
+
+export const TaskCommentSchema = z
+  .object({
+    id: z.string(),
+    comment_text: z.string(),
+    user: CommentAuthorSchema,
+  })
+  .passthrough()
+
+export type TaskComment = z.infer<typeof TaskCommentSchema>
+
+export const GetTaskCommentsResponseSchema = z
+  .object({
+    comments: z.array(TaskCommentSchema),
+  })
+  .passthrough()
+
+/**
+ * The full single-task shape returned by GET/POST/PUT task endpoints.
+ * `due_date`, `start_date` and `time_estimate` are all nullable per
+ * reliability rule 2 - a task genuinely can have none of these set, and
+ * that must come through as "absent" in this server's output, never as a
+ * guessed value.
+ */
+export const TaskDetailSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().optional(),
+    status: TaskStatusSchema,
+    priority: TaskPrioritySchema.nullable().optional(),
+    tags: z.array(TaskTagSchema).default([]),
+    assignees: z.array(TaskAssigneeSchema).default([]),
+    due_date: z.string().nullable().optional(),
+    start_date: z.string().nullable().optional(),
+    time_estimate: z.union([z.string(), z.number()]).nullable().optional(),
+    parent: z.string().nullable().optional(),
+    custom_fields: z.array(TaskCustomFieldValueSchema).default([]),
+    list: TaskListRefSchema,
+    url: z.string(),
+    subtasks: z.array(SubtaskSchema).optional(),
+  })
+  .passthrough()
+
+export type TaskDetail = z.infer<typeof TaskDetailSchema>
+
+/**
+ * The normalised task summary shape shared by every tool that returns a
+ * list of tasks rather than one task in full (`clickup_list_tasks`, and the
+ * `succeeded`/bulk-adjacent views in later tasks). Exported as a zod schema,
+ * not just a TypeScript type, so a consuming tool can build its own
+ * `outputSchema` as `z.array(TaskSummarySchema)` without redeclaring the
+ * shape - the same role `TaskDetailSchema` plays for a single task.
+ */
+export const TaskSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.string(),
+  list_id: z.string(),
+  list_name: z.string(),
+  url: z.string(),
+  due_date: z.string().optional(),
+})
+
+export type TaskSummary = z.infer<typeof TaskSummarySchema>

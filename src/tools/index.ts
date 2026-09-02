@@ -1,5 +1,6 @@
 import type { AnyToolDefinition } from '../core/registry.js'
 import { NAVIGATION_TOOLS } from './navigation.js'
+import { TASK_TOOLS } from './tasks.js'
 
 /**
  * The full tool set the server can offer. Tasks 10-16 each append their own
@@ -7,4 +8,4 @@ import { NAVIGATION_TOOLS } from './navigation.js'
  * via `selectTools` (mode, category, blocklist), so this array is
  * deliberately unfiltered.
  */
-export const ALL_TOOLS: AnyToolDefinition[] = [...NAVIGATION_TOOLS]
+export const ALL_TOOLS: AnyToolDefinition[] = [...NAVIGATION_TOOLS, ...TASK_TOOLS]
