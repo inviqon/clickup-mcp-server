@@ -399,13 +399,14 @@ Move a task to a different list (its "home list"), using ClickUp's v3 move endpo
 
 **Annotations**: readOnlyHint=false, destructiveHint=true, idempotentHint=false, openWorldHint=true
 
-Permanently delete a ClickUp task. This cannot be undone through this server - ClickUp has no undo for a deleted task, only its own trash UI, which this tool does not use. Only available in admin mode. Examples: "delete task 86abc", "remove the duplicate task I just created".
+Permanently delete a ClickUp task. This cannot be undone through this server - ClickUp has no undo for a deleted task, only its own trash UI, which this tool does not use. Requires confirm_name to exactly match the task's current name, read fresh at call time, so a stale or guessed id cannot destroy the wrong task. Only available in admin mode. Examples: "delete task 86abc, it is called 'Fix login bug'", "remove the duplicate task I just created".
 
 **Input parameters**
 
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `task_id` | string | yes |  |  |
+| `confirm_name` | string | yes |  | Must exactly match the task's current name - read it first if unsure |
 
 **Output fields**
 

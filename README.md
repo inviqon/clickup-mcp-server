@@ -164,9 +164,17 @@ Every tool is one of three modes, which double as its MCP annotations
 - **read** - `readOnlyHint: true`, always visible.
 - **write** - visible in `write` and `admin` mode.
 - **admin** - destructive (`destructiveHint: true`), visible only in
-  `CLICKUP_MCP_MODE=admin`. Every admin delete tool additionally requires a
-  `confirm_name` argument that must match the entity's current name, fetched
-  fresh at call time - a stale or guessed id cannot destroy the wrong thing.
+  `CLICKUP_MCP_MODE=admin`.
+
+Four of the five admin delete tools - `clickup_delete_task`,
+`clickup_delete_space`, `clickup_delete_folder` and `clickup_delete_list` -
+additionally require a `confirm_name` argument that must match the entity's
+current name, read fresh at call time; the DELETE is never reached on a
+mismatch, so a stale or guessed id cannot destroy the wrong thing. The fifth,
+`clickup_delete_time_entry`, has no such guard: a ClickUp time entry has no
+name to confirm against. There is nothing to type back, so requiring a
+confirmation string there would be theatre rather than a check - identify the
+entry with `clickup_list_time_entries` before deleting it.
 
 The full list, with input parameters, output fields and annotations for each
 tool, is generated straight from the code at

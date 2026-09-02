@@ -614,11 +614,33 @@ describe('clickup_move_task', () => {
 
 describe('clickup_delete_task', () => {
   it('deletes the task and confirms with its id, not a guessed name', async () => {
-    mswServer.use(...fx.deleteHandlers())
-    const out = await tool('clickup_delete_task').handler({ task_id: '86abc' }, testContext())
+    mswServer.use(...fx.taskHandlers(), ...fx.deleteHandlers())
+    const out = await tool('clickup_delete_task').handler(
+      { task_id: '86abc', confirm_name: 'Fix login bug' },
+      testContext(),
+    )
     expect(out).toEqual({ task_id: '86abc', deleted: true })
     const md = tool('clickup_delete_task').render(out, testContext())
     expect(md).toContain('86abc')
+  })
+
+  // The README promised every admin delete tool required a confirm_name.
+  // This one took only a task_id, so a stale or guessed id destroyed
+  // whatever it now pointed at. The DELETE must not be reachable at all on
+  // a mismatch, which is what `deleteCalled` proves.
+  it('refuses to delete when confirm_name does not match the task name', async () => {
+    let deleteCalled = false
+    mswServer.use(
+      ...fx.taskHandlers(),
+      http.delete(`${API}/v2/task/86abc`, () => {
+        deleteCalled = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    await expect(
+      tool('clickup_delete_task').handler({ task_id: '86abc', confirm_name: 'Wrong name' }, testContext()),
+    ).rejects.toThrow(/confirm_name "Wrong name" does not match task name "Fix login bug"/)
+    expect(deleteCalled).toBe(false)
   })
 })
 

@@ -20,20 +20,7 @@ import type { FolderDetail, ListWriteResponse, SpaceDetail } from '../clickup/sc
 import { omitUnset, nameWithId } from '../format/common.js'
 import { toAssigneeId } from './tasks.js'
 import { ClickUpUsageError } from '../core/errors.js'
-
-/**
- * The second gate every delete tool applies on top of admin mode (Task 13):
- * deleting a space, folder or list through the API is unrecoverable, so the
- * caller must have already read the entity - and named it correctly - before
- * this server destroys it. Fetching happens, and this check runs, strictly
- * before the delete call itself; every delete tool below awaits this before
- * calling its `delete*Raw` endpoint function.
- */
-function assertConfirmName(kind: string, actualName: string, confirmName: string): void {
-  if (actualName !== confirmName) {
-    throw new ClickUpUsageError(`confirm_name "${confirmName}" does not match ${kind} name "${actualName}"`)
-  }
-}
+import { assertConfirmName } from './confirm.js'
 
 const spaceOutputShape = {
   id: z.string(),

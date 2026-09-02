@@ -27,6 +27,7 @@ import { nameWithId, omitUnset, paginate } from '../format/common.js'
 import { boundPage } from '../clickup/pagination.js'
 import { renderBulkUpdateResult, renderTask } from '../format/task.js'
 import { toCommentOut } from '../format/comment.js'
+import { assertConfirmName } from './confirm.js'
 
 const PRIORITY_TO_INT: Record<'urgent' | 'high' | 'normal' | 'low', number> = {
   urgent: 1,
@@ -697,6 +698,7 @@ export const moveTaskTool: ToolDefinition<typeof moveTaskInputShape, typeof task
 
 const deleteTaskInputShape = {
   task_id: z.string(),
+  confirm_name: z.string().describe('Must exactly match the task\'s current name - read it first if unsure'),
 }
 
 const deleteTaskOutputShape = {
@@ -711,13 +713,19 @@ export const deleteTaskTool: ToolDefinition<typeof deleteTaskInputShape, typeof 
   mode: 'admin',
   description: [
     'Permanently delete a ClickUp task. This cannot be undone through this server - ClickUp has no',
-    'undo for a deleted task, only its own trash UI, which this tool does not use. Only available in',
-    'admin mode.',
-    'Examples: "delete task 86abc", "remove the duplicate task I just created".',
+    'undo for a deleted task, only its own trash UI, which this tool does not use. Requires',
+    'confirm_name to exactly match the task\'s current name, read fresh at call time, so a stale or',
+    'guessed id cannot destroy the wrong task. Only available in admin mode.',
+    'Examples: "delete task 86abc, it is called \'Fix login bug\'", "remove the duplicate task I just',
+    'created".',
   ].join(' '),
   inputSchema: deleteTaskInputShape,
   outputSchema: deleteTaskOutputShape,
   handler: async (args, ctx) => {
+    // Read first, confirm, then delete - the same order every structure
+    // delete tool uses. The DELETE call is never reached on a mismatch.
+    const current = await getTaskDetail(ctx, args.task_id)
+    assertConfirmName('task', current.name, args.confirm_name)
     await deleteTaskRaw(ctx, args.task_id)
     return { task_id: args.task_id, deleted: true }
   },
