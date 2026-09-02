@@ -24,6 +24,15 @@ import { z } from 'zod'
  */
 const zId = z.union([z.string(), z.number()]).transform((value) => String(value))
 
+/**
+ * Shared schema for a ClickUp endpoint that returns an empty (or
+ * effectively empty, from this server's point of view) success body - most
+ * delete and detach endpoints. Declared once here rather than redefined
+ * per-`endpoints/*.ts` file, which used to happen identically in five
+ * places.
+ */
+export const EmptyResponseSchema = z.object({}).passthrough()
+
 export const MemberUserSchema = z
   .object({
     id: zId,

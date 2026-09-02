@@ -1,14 +1,12 @@
-import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
 import { formatDate, formatDurationHm } from '../../core/dates.js'
 import {
+  EmptyResponseSchema,
   GetTimeEntriesResponseSchema,
   RunningTimeEntryResponseSchema,
   TimeEntryResponseSchema,
   type TimeEntry,
 } from '../schemas.js'
-
-const EmptyResponseSchema = z.object({}).passthrough()
 
 // -- Raw endpoint calls ------------------------------------------------
 

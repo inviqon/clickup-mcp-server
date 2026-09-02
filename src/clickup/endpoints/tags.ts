@@ -1,8 +1,5 @@
-import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
-import { GetSpaceTagsResponseSchema, type SpaceTag } from '../schemas.js'
-
-const EmptyResponseSchema = z.object({}).passthrough()
+import { EmptyResponseSchema, GetSpaceTagsResponseSchema, type SpaceTag } from '../schemas.js'
 
 export async function listSpaceTags(ctx: ClickUpContext, spaceId: string): Promise<SpaceTag[]> {
   const res = await ctx.client.request({

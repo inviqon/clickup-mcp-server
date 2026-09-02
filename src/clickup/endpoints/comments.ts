@@ -1,8 +1,5 @@
-import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
-import { CreateCommentResponseSchema } from '../schemas.js'
-
-const EmptyResponseSchema = z.object({}).passthrough()
+import { CreateCommentResponseSchema, EmptyResponseSchema } from '../schemas.js'
 
 /**
  * Reading a task's comments (`GET /task/{id}/comment`) lives in

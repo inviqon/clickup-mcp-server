@@ -268,7 +268,7 @@ export type StatusOut = {
   type: string
 }
 
-export type CustomFieldOut = {
+export type CustomFieldDefinitionOut = {
   id: string
   name: string
   type: string
@@ -281,7 +281,7 @@ export type ListMeta = {
   /** The list's description. Omitted, per reliability rule 2, when ClickUp reports it as null or "". */
   content?: string
   statuses: StatusOut[]
-  custom_fields: CustomFieldOut[]
+  custom_fields: CustomFieldDefinitionOut[]
 }
 
 async function buildListMeta(ctx: ClickUpContext, listId: string): Promise<ListMeta> {

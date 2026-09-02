@@ -1,6 +1,6 @@
-import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
 import {
+  EmptyResponseSchema,
   FolderDetailSchema,
   ListWriteResponseSchema,
   SpaceDetailSchema,
@@ -8,8 +8,6 @@ import {
   type ListWriteResponse,
   type SpaceDetail,
 } from '../schemas.js'
-
-const EmptyResponseSchema = z.object({}).passthrough()
 
 // -- Space ---------------------------------------------------------------
 

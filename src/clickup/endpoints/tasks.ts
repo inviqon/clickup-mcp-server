@@ -1,10 +1,11 @@
-import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
 import { formatDate, formatDurationHm } from '../../core/dates.js'
 import { ClickUpUsageError } from '../../core/errors.js'
 import { loadListMeta, type ListMeta } from './workspace.js'
 import { walkTaskPages } from '../pagination.js'
+import type { CommentOut } from '../../format/comment.js'
 import {
+  EmptyResponseSchema,
   GetTaskCommentsResponseSchema,
   GetTasksResponseSchema,
   TaskDetailSchema,
@@ -68,8 +69,6 @@ export function updateTaskRaw(ctx: ClickUpContext, taskId: string, body: Record<
     body,
   })
 }
-
-const EmptyResponseSchema = z.object({}).passthrough()
 
 /**
  * `POST /v2/task/{task_id}/field/{field_id}` - sets one custom field's
@@ -237,8 +236,7 @@ export async function listTasksRaw(ctx: ClickUpContext, filter: ListTasksFilter)
 // -- Normalised projections ---------------------------------------------
 
 export type SubtaskOut = { id: string; name: string; status: string }
-export type CommentOut = { id: string; author: string; date: string; text: string }
-export type CustomFieldOut = { id: string; name: string; value: unknown }
+export type CustomFieldValueOut = { id: string; name: string; value: unknown }
 export type AssigneeOut = { id: string; username: string }
 
 /**
@@ -262,7 +260,7 @@ export type TaskOut = {
   start_date?: string | undefined
   time_estimate?: string | undefined
   parent?: string | undefined
-  custom_fields?: CustomFieldOut[] | undefined
+  custom_fields?: CustomFieldValueOut[] | undefined
   list_id: string
   list_name: string
   url: string
