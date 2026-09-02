@@ -1,0 +1,119 @@
+/**
+ * Response envelope, truncation and markdown primitives shared by every
+ * renderer in the server.
+ *
+ * `omitEmpty` and `bulletList` exist so that omitting a missing value is the
+ * path of least resistance: no renderer downstream has to remember the rule
+ * that a missing value is left out of output, never rendered as N/A, null,
+ * or a guessed default. `truncateResponse` exists so that truncation is
+ * always visible: an agent can never mistake a truncated list for a
+ * complete one.
+ */
+
+export type Page<T> = {
+  total: number
+  count: number
+  offset: number
+  items: T[]
+  has_more: boolean
+  next_offset?: number
+}
+
+export type PaginateOptions = {
+  offset: number
+  limit: number
+  total?: number | undefined
+}
+
+/**
+ * Slices `items` into one page starting at `offset` for up to `limit`
+ * entries. `total` defaults to `items.length`, but an explicit `total` wins:
+ * that covers the case where the caller only holds one upstream page and
+ * knows the true total from elsewhere (e.g. the API's own pagination
+ * metadata). `next_offset` is present only when there is more to fetch, and
+ * is genuinely absent (not set to `undefined`) otherwise, so JSON output
+ * does not carry a stray `"next_offset": null`-like key.
+ */
+export function paginate<T>(items: T[], opts: PaginateOptions): Page<T> {
+  const { offset, limit } = opts
+  const pageItems = items.slice(offset, offset + limit)
+  const total = opts.total ?? items.length
+  const count = pageItems.length
+  const hasMore = total > offset + count
+
+  const page: Page<T> = {
+    total,
+    count,
+    offset,
+    items: pageItems,
+    has_more: hasMore,
+  }
+  if (hasMore) {
+    page.next_offset = offset + count
+  }
+  return page
+}
+
+export type TruncateOptions = {
+  maxChars: number
+  itemCount: number
+  retryHint: string
+}
+
+/**
+ * Returns `text` unchanged when it fits within `maxChars`. Otherwise cuts it
+ * down and appends a notice that names what happened and how to get the
+ * rest, so a truncated response can never be mistaken for a complete one.
+ */
+export function truncateResponse(text: string, opts: TruncateOptions): string {
+  if (text.length <= opts.maxChars) {
+    return text
+  }
+  const notice = `\n\n[Response truncated: showing a partial result of ${opts.itemCount} item(s). ${opts.retryHint}]`
+  const budgetForBody = Math.max(0, opts.maxChars - notice.length)
+  return text.slice(0, budgetForBody) + notice
+}
+
+/**
+ * Renders "Name (id)" with the id verbatim, the standard way entities are
+ * named in tool output so an agent has both a human label and the exact id
+ * to pass back in a follow-up call.
+ */
+export function nameWithId(name: string, id: string): string {
+  return `${name} (${id})`
+}
+
+function isEmpty(value: unknown): boolean {
+  return value === undefined || value === null || value === ''
+}
+
+/**
+ * Drops keys whose value is `undefined`, `null` or an empty string, and
+ * keeps everything else -- including `false` and `0`. That distinction is
+ * the whole point: a falsy-but-real value is data, and dropping it would be
+ * the same class of bug as inventing a placeholder for a missing one.
+ */
+export function omitEmpty<T extends object>(obj: T): Partial<T> {
+  const result: Partial<T> = {}
+  for (const key of Object.keys(obj) as Array<keyof T>) {
+    const value = obj[key]
+    if (!isEmpty(value)) {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+/**
+ * Renders `[label, value]` pairs as markdown bullets, skipping any entry
+ * whose value is `undefined` rather than printing a placeholder for it.
+ */
+export function bulletList(entries: Array<[string, string | undefined]>): string[] {
+  const lines: string[] = []
+  for (const [label, value] of entries) {
+    if (value !== undefined) {
+      lines.push(`- **${label}**: ${value}`)
+    }
+  }
+  return lines
+}
