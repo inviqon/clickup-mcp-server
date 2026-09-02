@@ -28,6 +28,31 @@ describe('clickup_search_docs', () => {
     expect(md).toContain('No docs found matching "zzz"')
   })
 
+  it('does not claim to be bounded when fewer than 100 docs exist', async () => {
+    mswServer.use(...fx.searchDocsHandlers())
+    const out = await tool('clickup_search_docs').handler({ query: 'zzz', limit: 10, offset: 0 }, testContext())
+    expect(out.bounded).toBeUndefined()
+  })
+
+  it('names the 100-doc cap on an empty match rather than reading as a true empty result', async () => {
+    mswServer.use(...fx.fullPageDocsHandlers())
+    const out = await tool('clickup_search_docs').handler({ query: 'architecture', limit: 10, offset: 0 }, testContext())
+    expect(out.items).toEqual([])
+    expect(out.bounded).toBe(true)
+    const md = tool('clickup_search_docs').render(out, testContext())
+    expect(md).toContain('No docs found matching "architecture"')
+    expect(md).toContain('first 100 docs were searched')
+  })
+
+  it('names the 100-doc cap on a non-empty match too', async () => {
+    mswServer.use(...fx.fullPageDocsHandlers())
+    const out = await tool('clickup_search_docs').handler({ query: 'sprint notes 5', limit: 10, offset: 0 }, testContext())
+    expect(out.items.length).toBeGreaterThan(0)
+    expect(out.bounded).toBe(true)
+    const md = tool('clickup_search_docs').render(out, testContext())
+    expect(md).toContain('first 100 docs were searched')
+  })
+
   it('paginates matches, reporting has_more', async () => {
     mswServer.use(...fx.searchDocsHandlers())
     const out = await tool('clickup_search_docs').handler({ query: 'e', limit: 1, offset: 0 }, testContext())

@@ -9,15 +9,42 @@ import { nameWithId } from './common.js'
 export type NamedRef = { id: string; name: string }
 
 /**
+ * The note appended to a `clickup_search_docs` result - empty or not - when
+ * `listDocsRaw` (src/clickup/endpoints/docs.ts) came back with exactly
+ * `DOCS_LIST_LIMIT` docs, ClickUp's own page-size cap. That count is
+ * genuinely ambiguous on its own: it means either "the workspace has
+ * exactly 100 docs" or "there are more we never saw", and this project has
+ * already fixed the same defect class twice (`clickup_list_tasks`'s and
+ * `clickup_get_my_day`'s own `bounded` notes) - a cap being silently
+ * indistinguishable from a true result is not acceptable here either,
+ * least of all on the empty-match path, where it looks exactly like "this
+ * doc does not exist".
+ */
+function docsBoundedNote(): string {
+  return (
+    'Only the workspace\'s first 100 docs were searched - ClickUp\'s Docs API has no server-side name filter to ' +
+    'page further with, so a match beyond that would not be found here. If you know the doc\'s id, ' +
+    'clickup_read_doc works regardless of this limit.'
+  )
+}
+
+/**
  * Renders a `clickup_search_docs` result. An empty match states the query
  * that produced it explicitly (reliability rule 5) rather than rendering a
- * bare, ambiguous "no results".
+ * bare, ambiguous "no results" - and, when the cap was hit, says so on
+ * BOTH the empty and non-empty paths, since a capped empty result and a
+ * genuine empty result must not read alike.
  */
-export function renderDocSearch(query: string, items: NamedRef[]): string {
+export function renderDocSearch(query: string, items: NamedRef[], bounded = false): string {
   if (items.length === 0) {
-    return `No docs found matching "${query}".`
+    const notice = `No docs found matching "${query}".`
+    return bounded ? `${notice} ${docsBoundedNote()}` : notice
   }
-  return [`# Docs matching "${query}"`, '', ...items.map((d) => `- ${nameWithId(d.name, d.id)}`)].join('\n')
+  const lines = [`# Docs matching "${query}"`, '', ...items.map((d) => `- ${nameWithId(d.name, d.id)}`)]
+  if (bounded) {
+    lines.push('', docsBoundedNote())
+  }
+  return lines.join('\n')
 }
 
 /**

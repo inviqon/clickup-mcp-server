@@ -63,6 +63,24 @@ export function searchDocsHandlers() {
   ]
 }
 
+/**
+ * `GET /v3/workspaces/9007/docs` returning exactly `DOCS_LIST_LIMIT` (100)
+ * docs, none named "architecture" - exercises the cap-hit path
+ * (`bounded: true`) distinctly from `searchDocsHandlers`' two-doc fixture,
+ * which never hits the cap. Named "Sprint Notes N" throughout so a search
+ * for "architecture" against this fixture is a genuine (if ambiguous) empty
+ * match, not a fixture bug.
+ */
+export function fullPageDocsHandlers() {
+  return [
+    http.get(`${API}/v3/workspaces/${TEAM_ID}/docs`, () =>
+      HttpResponse.json({
+        docs: Array.from({ length: 100 }, (_, i) => docCore(`d-${i}`, `Sprint Notes ${i}`)),
+      }),
+    ),
+  ]
+}
+
 const PAGE_CONTENT = 'The system is layered into api, core and clickup modules.'
 
 /**

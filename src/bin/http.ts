@@ -32,15 +32,58 @@ function sendRpcError(res: ServerResponse, status: number, message: string): voi
 }
 
 /**
+ * Finishes a request that failed inside `handleMcpRequest`'s outer `try`,
+ * after `transport.handleRequest` may already have started writing a
+ * response. When no bytes have gone out yet, this is a normal structured
+ * error. When headers are already sent - `transport.handleRequest` started
+ * streaming a response and then failed partway through - a second
+ * `writeHead`/JSON body is impossible, and simply returning (the previous
+ * behaviour) left the connection open with no further data ever coming,
+ * hanging the client. `destroy()` closes it immediately instead; there is
+ * no well-formed error body to send at that point anyway.
+ */
+export function failRequest(res: ServerResponse, status: number, message: string): void {
+  if (res.headersSent) {
+    if (!res.writableEnded) {
+      res.destroy()
+    }
+    return
+  }
+  sendRpcError(res, status, message)
+}
+
+/**
+ * A generous but bounded ceiling on one request body, read entirely into
+ * memory before being handed to the MCP transport (see `readJsonBody`'s own
+ * comment for why there is no streaming body parser here to delegate to).
+ * Without a cap, a single slow POST with an oversized body is an unbounded
+ * allocation on a server that `CLICKUP_HTTP_HOST` exists precisely to allow
+ * hosting beyond loopback. 5 MiB comfortably covers any realistic MCP
+ * tool-call payload this server's own tools accept.
+ */
+export const MAX_BODY_BYTES = 5 * 1024 * 1024
+
+/** Thrown by `readJsonBody` when the body exceeds `MAX_BODY_BYTES`; the caller turns this into a 413. */
+class PayloadTooLargeError extends Error {}
+
+/**
  * Reads and JSON-parses the request body. `StreamableHTTPServerTransport.handleRequest`
  * takes an optional pre-parsed body (its own doc comment calls this out as
  * "pre-parsed body from body-parser middleware") - this server has no body
  * parser dependency, so it reads the body itself rather than adding one.
- * Throws on malformed JSON; the caller turns that into a 400.
+ * Throws `PayloadTooLargeError` once accumulated bytes exceed
+ * `MAX_BODY_BYTES` (checked per chunk, so this never buffers more than one
+ * chunk past the cap), or a `SyntaxError` from `JSON.parse` on malformed
+ * JSON; the caller turns the former into a 413 and the latter into a 400.
  */
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
+  let totalBytes = 0
   for await (const chunk of req as AsyncIterable<Buffer>) {
+    totalBytes += chunk.length
+    if (totalBytes > MAX_BODY_BYTES) {
+      throw new PayloadTooLargeError(`Request body exceeds ${MAX_BODY_BYTES} bytes.`)
+    }
     chunks.push(chunk)
   }
   const text = Buffer.concat(chunks).toString('utf8')
@@ -63,6 +106,19 @@ function isOriginAllowed(origin: string | undefined, allowedOrigins: string[]): 
 }
 
 /**
+ * Strips a leading `Bearer ` (case-insensitive) from an `Authorization`
+ * header value. ClickUp's own API expects the raw personal token, not an
+ * OAuth-style bearer scheme, but real MCP clients commonly send
+ * `Authorization: Bearer <token>` regardless - without this, `Bearer ` would
+ * travel to ClickUp as part of the token and fail as an opaque 401 with no
+ * hint of why. A value with no such prefix passes through unchanged.
+ */
+function stripBearerPrefix(value: string): string {
+  const match = /^Bearer\s+(.+)$/i.exec(value)
+  return match?.[1] ?? value
+}
+
+/**
  * The token for one request: the `Authorization` header when present,
  * otherwise `CLICKUP_API_KEY` from the environment. No feature flag decides
  * between the two - this is the whole rule, always applied. `undefined`
@@ -72,7 +128,7 @@ function isOriginAllowed(origin: string | undefined, allowedOrigins: string[]): 
 function resolveToken(req: IncomingMessage, config: ServerConfig): string | undefined {
   const header = firstHeaderValue(req.headers.authorization)
   if (header !== undefined && header.length > 0) {
-    return header
+    return stripBearerPrefix(header)
   }
   return config.apiKey.length > 0 ? config.apiKey : undefined
 }
@@ -112,8 +168,12 @@ async function handleMcpRequest(
   let body: unknown
   try {
     body = await readJsonBody(req)
-  } catch {
-    sendRpcError(res, 400, 'Malformed JSON request body.')
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) {
+      sendRpcError(res, 413, 'Request body too large.')
+    } else {
+      sendRpcError(res, 400, 'Malformed JSON request body.')
+    }
     return
   }
 
@@ -146,9 +206,7 @@ async function handleMcpRequest(
     await mcpServer.connect(transport as unknown as Transport)
     await transport.handleRequest(req, res, body)
   } catch {
-    if (!res.headersSent) {
-      sendRpcError(res, 500, 'Internal server error.')
-    }
+    failRequest(res, 500, 'Internal server error.')
   }
 }
 

@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { createHttpServer } from '../src/bin/http.js'
+import type { ServerResponse } from 'node:http'
+import { createHttpServer, failRequest, MAX_BODY_BYTES } from '../src/bin/http.js'
 import { loadConfig } from '../src/core/config.js'
 
 /**
@@ -150,6 +151,16 @@ describe('http transport', () => {
     const text = await res.text()
     expect(text).not.toContain('pk_secret')
   })
+
+  it('rejects a body over MAX_BODY_BYTES with 413 rather than buffering it all', async () => {
+    const oversized = 'x'.repeat(MAX_BODY_BYTES + 1024)
+    const res = await fetch(`${base}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: oversized,
+    })
+    expect(res.status).toBe(413)
+  })
 })
 
 describe('credentials', () => {
@@ -188,6 +199,22 @@ describe('credentials', () => {
     expect(seenTokens).toEqual(['pk_header_token'])
     expect(seenTokens).not.toContain('pk_env')
   })
+
+  it('strips a leading "Bearer " from the Authorization header before using it as the token', async () => {
+    const seenTokens: Array<string | null> = []
+    mswServer.use(
+      http.get('https://api.clickup.com/api/v2/user', ({ request }) => {
+        seenTokens.push(request.headers.get('authorization'))
+        return HttpResponse.json({ user: { id: 1, username: 'bearer-user' } })
+      }),
+    )
+    const res = await rpc(resolveMeCall(4), { authorization: 'Bearer pk_bearer_token' })
+    expect(res.status).toBe(200)
+    // The raw token reaches ClickUp with no "Bearer " prefix - if this were
+    // left in, it would arrive as part of the token and ClickUp would
+    // reject it as an opaque 401.
+    expect(seenTokens).toEqual(['pk_bearer_token'])
+  })
 })
 
 describe('tenant isolation', () => {
@@ -215,5 +242,65 @@ describe('tenant isolation', () => {
     const resA2 = await rpc(workspaceTreeCall, { authorization: 'pk_tenant_a' })
     expect(resA2.status).toBe(200)
     expect(upstreamCalls).toBe(2)
+  })
+})
+
+/**
+ * `failRequest` handles the case where `transport.handleRequest` already
+ * started writing a response before failing partway through - not
+ * reproducible through this file's own `rpc()` helper without deeply
+ * mocking the SDK transport, since a genuine mid-stream failure only ever
+ * happens inside the SDK's own internals. Exercised directly instead, with
+ * minimal fake `ServerResponse`-shaped objects, since the property under
+ * test (do not double-write; do not leave the connection hanging) is a
+ * pure function of `headersSent`/`writableEnded`, not of anything the real
+ * HTTP stack adds.
+ */
+describe('failRequest', () => {
+  function fakeResponse(overrides: Partial<ServerResponse>): {
+    calls: { writeHead: unknown[]; end: unknown[]; destroy: number }
+    res: ServerResponse
+  } {
+    const calls = { writeHead: [] as unknown[], end: [] as unknown[], destroy: 0 }
+    const res = {
+      headersSent: false,
+      writableEnded: false,
+      writeHead: (...args: unknown[]) => {
+        calls.writeHead.push(args)
+        return res
+      },
+      end: (...args: unknown[]) => {
+        calls.end.push(args)
+        return res
+      },
+      destroy: () => {
+        calls.destroy++
+        return res
+      },
+      ...overrides,
+    } as unknown as ServerResponse
+    return { calls, res }
+  }
+
+  it('sends a normal structured error when no bytes have gone out yet', () => {
+    const { calls, res } = fakeResponse({ headersSent: false })
+    failRequest(res, 500, 'boom')
+    expect(calls.writeHead.length).toBe(1)
+    expect(calls.end.length).toBe(1)
+    expect(calls.destroy).toBe(0)
+  })
+
+  it('destroys the connection instead of hanging it when headers were already sent', () => {
+    const { calls, res } = fakeResponse({ headersSent: true, writableEnded: false })
+    failRequest(res, 500, 'boom')
+    expect(calls.writeHead.length).toBe(0)
+    expect(calls.destroy).toBe(1)
+  })
+
+  it('does nothing further when the response already finished on its own', () => {
+    const { calls, res } = fakeResponse({ headersSent: true, writableEnded: true })
+    failRequest(res, 500, 'boom')
+    expect(calls.destroy).toBe(0)
+    expect(calls.writeHead.length).toBe(0)
   })
 })

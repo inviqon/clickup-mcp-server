@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { AnyToolDefinition, ToolDefinition } from '../core/registry.js'
-import { getDocPageRaw, listDocPagesRaw, listDocsRaw } from '../clickup/endpoints/docs.js'
+import { DOCS_LIST_LIMIT, getDocPageRaw, listDocPagesRaw, listDocsRaw } from '../clickup/endpoints/docs.js'
 import { omitEmpty, paginate, truncateResponse } from '../format/common.js'
 import { renderDocPageContent, renderDocPageList, renderDocSearch } from '../format/doc.js'
 
@@ -27,6 +27,16 @@ const searchDocsOutputShape = {
   items: z.array(z.object(namedRefOutputShape)),
   has_more: z.boolean(),
   next_offset: z.number().optional(),
+  /**
+   * Present (and true) only when `listDocsRaw` came back with exactly
+   * `DOCS_LIST_LIMIT` docs - ClickUp's Docs API has no free-text filter to
+   * page further with (see the schema-level comment on
+   * `SearchDocsResponseSchema`, src/clickup/schemas.ts), so a workspace
+   * with more docs than that can have a match this search never sees. Read
+   * by `renderDocSearch` (src/format/doc.ts) to say so explicitly, on both
+   * the empty and non-empty render paths.
+   */
+  bounded: z.boolean().optional(),
 }
 
 export const searchDocsTool: ToolDefinition<typeof searchDocsInputShape, typeof searchDocsOutputShape> = {
@@ -48,9 +58,10 @@ export const searchDocsTool: ToolDefinition<typeof searchDocsInputShape, typeof 
     const needle = args.query.toLowerCase()
     const matched = docs.filter((d) => d.name.toLowerCase().includes(needle)).map((d) => ({ id: d.id, name: d.name }))
     const page = paginate(matched, { offset: args.offset, limit: args.limit })
-    return { query: args.query, ...page }
+    const bounded = docs.length === DOCS_LIST_LIMIT
+    return { query: args.query, ...page, ...(bounded ? { bounded: true } : {}) }
   },
-  render: (out) => renderDocSearch(out.query, out.items),
+  render: (out) => renderDocSearch(out.query, out.items, out.bounded ?? false),
 }
 
 // ---------------------------------------------------------------------------

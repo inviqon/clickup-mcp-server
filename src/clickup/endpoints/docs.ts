@@ -14,7 +14,7 @@ import {
  * search to page through, so `clickup_search_docs` (src/tools/docs.ts)
  * filters this one page client-side rather than walking a cursor.
  */
-const DOCS_LIST_LIMIT = 100
+export const DOCS_LIST_LIMIT = 100
 
 /**
  * `GET /v3/workspaces/{teamId}/docs` - the workspace's docs, one page of up
