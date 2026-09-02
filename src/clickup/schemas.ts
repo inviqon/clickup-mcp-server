@@ -429,6 +429,19 @@ export type TaskSummary = z.infer<typeof TaskSummarySchema>
  * (src/clickup/endpoints/tasks.ts) treat exactly that failure as "cannot
  * tell whether the ClickApp is enabled" and say so explicitly, rather than
  * ever rendering a confident "0m".
+ *
+ * `total_time.since`, by contrast, IS `.nullable()` (in addition to
+ * `.optional()`) - the same pattern `ListDetailSchema.task_count` and
+ * `TaskDetailSchema.time_estimate` already use elsewhere in this file for a
+ * ClickUp field that can genuinely arrive as an explicit `null`. Declaring
+ * it required-non-null would have made a real ClickUp response (current
+ * status/history genuinely present, `since` merely not yet known) fail the
+ * same strict parse that `status`/`by_minute` deliberately do fail on a
+ * shapeless response - turning a CORRECT answer into the disabled-ClickApp
+ * error this schema exists to guard against, exactly the failure mode the
+ * increment review flagged. `toTimeInStatusPeriodOut`
+ * (src/clickup/endpoints/tasks.ts) treats `null` the same as absent: no
+ * `since` line, never a fabricated epoch-zero date from `Number(null)`.
  */
 export const TimeInStatusPeriodSchema = z
   .object({
@@ -437,7 +450,7 @@ export const TimeInStatusPeriodSchema = z
     total_time: z
       .object({
         by_minute: z.number(),
-        since: z.union([z.string(), z.number()]).optional(),
+        since: z.union([z.string(), z.number()]).nullable().optional(),
       })
       .passthrough(),
   })
@@ -457,7 +470,7 @@ export const TimeInStatusHistoryEntrySchema = z
     total_time: z
       .object({
         by_minute: z.number(),
-        since: z.union([z.string(), z.number()]).optional(),
+        since: z.union([z.string(), z.number()]).nullable().optional(),
       })
       .passthrough(),
   })

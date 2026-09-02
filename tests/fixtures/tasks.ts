@@ -719,6 +719,27 @@ export function taskTimeInStatusNoHistoryHandlers() {
 }
 
 /**
+ * Same endpoint, a valid response whose current_status.total_time carries
+ * an explicit `since: null` rather than omitting the key - a shape ClickUp
+ * genuinely uses elsewhere for a value it does not (yet) have (see
+ * `ListDetailSchema.task_count`/`TaskDetailSchema.time_estimate`). This
+ * must parse and render as an ordinary, well-shaped response with no since
+ * line - not as the shapeless/disabled-ClickApp case below, which the
+ * increment review flagged as exactly the failure this schema must not
+ * produce for a genuinely valid response.
+ */
+export function taskTimeInStatusNullSinceHandlers() {
+  return [
+    http.get(`${API}/v2/task/${TASK_ID}/time_in_status`, () =>
+      HttpResponse.json({
+        current_status: { status: 'open', color: '#d3d3d3', total_time: { by_minute: 90, since: null } },
+        status_history: [],
+      }),
+    ),
+  ]
+}
+
+/**
  * A 200 response that is valid JSON but does not carry the
  * current_status/status_history shape this server requires. ClickUp's own
  * reference documents only that the "Total time in Status" ClickApp "must

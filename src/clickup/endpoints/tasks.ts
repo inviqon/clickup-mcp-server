@@ -609,17 +609,20 @@ export type TimeInStatusPeriodOut = {
  * defect of this shape would appear. `since` is formatted through
  * `formatDate`, the same offset-carrying timestamp form every other date in
  * this server uses, and omitted (never a placeholder) when ClickUp did not
- * report one.
+ * report one - `null` is treated identically to `undefined` here (both mean
+ * "ClickUp did not give a since"), never passed to `Number()`, which would
+ * silently produce a fabricated epoch-zero date rather than an omitted
+ * field (increment review finding).
  */
 export function toTimeInStatusPeriodOut(
-  period: { status: string; total_time: { by_minute: number; since?: string | number | undefined } },
+  period: { status: string; total_time: { by_minute: number; since?: string | number | null | undefined } },
   timezone: string,
 ): TimeInStatusPeriodOut {
   const out: TimeInStatusPeriodOut = {
     status: period.status,
     duration: formatDurationHm(period.total_time.by_minute * 60_000),
   }
-  if (period.total_time.since !== undefined) {
+  if (period.total_time.since !== undefined && period.total_time.since !== null) {
     out.since = formatDate(Number(period.total_time.since), timezone)
   }
   return out

@@ -767,6 +767,17 @@ describe('clickup_get_task_time_in_status', () => {
     expect(md).toMatch(/no prior status history/i)
   })
 
+  it('accepts an explicit "since": null as a valid, well-shaped response - not the shapeless/disabled-ClickApp case (increment review)', async () => {
+    mswServer.use(...fx.taskTimeInStatusNullSinceHandlers())
+    const out = await tool('clickup_get_task_time_in_status').handler({ task_id: '86abc' }, testContext())
+    expect(out.current_status.status).toBe('open')
+    expect(out.current_status.duration).toBe('1h 30m')
+    expect(out.current_status.since).toBeUndefined()
+    const md = tool('clickup_get_task_time_in_status').render(out, testContext())
+    expect(md).not.toMatch(/Total time in Status/)
+    expect(md).not.toContain('(since')
+  })
+
   it('throws naming the Total Time in Status ClickApp when the response is shapeless, instead of reporting 0m', async () => {
     mswServer.use(...fx.taskTimeInStatusDisabledClickAppHandlers())
     await expect(
@@ -843,7 +854,7 @@ describe('clickup_get_tasks_time_in_status_bulk', () => {
     expect(good.current_status.duration).toBe('30m')
   })
 
-  it('renders a compact table naming every task, not one bullet per status entry', async () => {
+  it('renders a compact table naming every task, not one bullet per status entry, and names a task with no prior status history explicitly', async () => {
     mswServer.use(...fx.bulkTimeInStatusHandlers({ omit: ['86def'] }))
     const out = await tool('clickup_get_tasks_time_in_status_bulk').handler(
       { task_ids: ['86abc', '86def'] },
@@ -853,5 +864,11 @@ describe('clickup_get_tasks_time_in_status_bulk', () => {
     expect(md).toContain('86abc')
     expect(md).toContain('86def')
     expect(md).toContain('|')
+    // Every ordinary fixture entry from bulkTimeInStatusHandlers carries a
+    // genuinely empty status_history (task 86abc here included) - this
+    // asserts the "no prior status history" History-column text the render
+    // path already produces for that case, rather than leaving it exercised
+    // but never checked (increment review).
+    expect(md).toMatch(/no prior status history/i)
   })
 })
