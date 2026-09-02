@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { ClickUpClient } from '../../src/clickup/client.js'
 import { ClickUpApiError, ClickUpSchemaError } from '../../src/core/errors.js'
@@ -62,19 +62,32 @@ describe('ClickUpClient', () => {
 
   it('retries a 429 using X-RateLimit-Reset and then succeeds', async () => {
     let calls = 0
+    let resetSeconds = 0
     mswServer.use(http.get('https://api.clickup.com/api/v2/task/1', () => {
       calls++
       if (calls === 1) {
+        resetSeconds = Math.floor(Date.now() / 1000) + 1
         return new HttpResponse(null, {
           status: 429,
-          headers: { 'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 1) },
+          headers: { 'X-RateLimit-Reset': String(resetSeconds) },
         })
       }
       return HttpResponse.json({ id: '1' })
     }))
-    const out = await client().request({ method: 'GET', path: '/task/1', schema })
+    // Constructed locally (rather than via the shared `client()` helper) so the
+    // test can spy on this specific limiter instance's notifyReset method.
+    const limiter = new RateLimiter({ limitPerMinute: 1000, sleep: async () => {} })
+    const notifyReset = vi.spyOn(limiter, 'notifyReset')
+    const out = await new ClickUpClient({ token: 'pk_123', limiter })
+      .request({ method: 'GET', path: '/task/1', schema })
     expect(out.id).toBe('1')
     expect(calls).toBe(2)
+    // Pin that notifyReset was actually invoked, and with a correctly-converted
+    // Date: X-RateLimit-Reset is Unix seconds, Date expects milliseconds, so a
+    // seconds-treated-as-milliseconds bug must fail this assertion.
+    expect(notifyReset).toHaveBeenCalledTimes(1)
+    expect(notifyReset.mock.calls[0]?.[0]).toBeInstanceOf(Date)
+    expect((notifyReset.mock.calls[0]?.[0] as Date).getTime()).toBe(resetSeconds * 1000)
   })
 
   it('surfaces a persistent 429 as ClickUpApiError carrying resetAt', async () => {
