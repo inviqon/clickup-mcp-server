@@ -50,7 +50,21 @@ export function stopTimerRaw(ctx: ClickUpContext): Promise<TimeEntry> {
 export type ListTimeEntriesFilter = {
   startMs?: number | undefined
   endMs?: number | undefined
-  assignee?: number | undefined
+  /**
+   * User ids to filter by. ClickUp's own reference page for this endpoint
+   * documents `assignee` as a SINGLE query parameter carrying a comma
+   * separated list ("assignee=1234,9876"), not one repeated `assignee`
+   * param per id - unlike this server's `space_ids[]`/`list_ids[]` style
+   * elsewhere (`getWorkspaceTasks`, src/clickup/endpoints/workspace.ts).
+   * Joined into that one string here, not left to `ClickUpClient`'s own
+   * array handling, which would produce the wrong wire format for this
+   * endpoint specifically.
+   */
+  assigneeIds?: number[] | undefined
+  isBillable?: boolean | undefined
+  spaceId?: string | undefined
+  folderId?: string | undefined
+  listId?: string | undefined
   taskId?: string | undefined
 }
 
@@ -62,6 +76,12 @@ export type ListTimeEntriesFilter = {
  * range instead, so there is no upstream page to walk here. The asymmetry
  * with `listTasksRaw` is intentional, not a gap this function forgot to
  * close.
+ *
+ * `include_location_names` is always sent as `true`: `clickup_list_time_entries`
+ * needs it to surface an entry's list/space (B1), and `clickup_time_report`
+ * needs it to group by list or space (B2) - both consumers of this one
+ * function want it every time, so it is not threaded through as a filter
+ * option that every caller would just set to `true` anyway.
  */
 export async function listTimeEntriesRaw(ctx: ClickUpContext, filter: ListTimeEntriesFilter): Promise<TimeEntry[]> {
   const res = await ctx.client.request({
@@ -71,8 +91,13 @@ export async function listTimeEntriesRaw(ctx: ClickUpContext, filter: ListTimeEn
     query: {
       start_date: filter.startMs,
       end_date: filter.endMs,
-      assignee: filter.assignee,
+      assignee: filter.assigneeIds !== undefined && filter.assigneeIds.length > 0 ? filter.assigneeIds.join(',') : undefined,
+      is_billable: filter.isBillable,
+      space_id: filter.spaceId,
+      folder_id: filter.folderId,
+      list_id: filter.listId,
       task_id: filter.taskId,
+      include_location_names: true,
     },
   })
   return res.data
@@ -125,6 +150,19 @@ export type TimeEntryOut = {
   start: string
   end?: string | undefined
   duration: string
+  /**
+   * The entry's owner. Was previously discarded entirely (B1) - a caller
+   * had no way to tell whose entry it was looking at, which is exactly the
+   * gap `clickup_time_report` (B2) needs closed to group by member. `id`
+   * and `username` only, matching `TaskAssigneeSchema`'s shape - the
+   * entry's `user` object also carries `email`/`color`/`initials`/
+   * `profilePicture`, none of which any tool in this server reads.
+   */
+  user?: { id: string; username: string } | undefined
+  list_id?: string | undefined
+  list_name?: string | undefined
+  space_id?: string | undefined
+  space_name?: string | undefined
 }
 
 /**
@@ -158,6 +196,23 @@ export function toTimeEntryOut(entry: TimeEntry, timezone: string): TimeEntryOut
   }
   if (entry.end !== null && entry.end !== undefined) {
     out.end = formatDate(Number(entry.end), timezone)
+  }
+  if (entry.user !== undefined) {
+    out.user = { id: entry.user.id, username: entry.user.username }
+  }
+  if (entry.task_location !== undefined) {
+    if (entry.task_location.list_id !== undefined) {
+      out.list_id = entry.task_location.list_id
+    }
+    if (entry.task_location.list_name !== undefined) {
+      out.list_name = entry.task_location.list_name
+    }
+    if (entry.task_location.space_id !== undefined) {
+      out.space_id = entry.task_location.space_id
+    }
+    if (entry.task_location.space_name !== undefined) {
+      out.space_name = entry.task_location.space_name
+    }
   }
   return out
 }

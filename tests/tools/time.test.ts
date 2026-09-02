@@ -255,18 +255,55 @@ describe('clickup_list_time_entries', () => {
     expect(md).toContain('No time entries found for')
   })
 
-  it('converts a string assignee id to a number before sending it', async () => {
+  it('sends a single assignee id as one comma separated parameter', async () => {
     const seen: URLSearchParams[] = []
     mswServer.use(...fx.listTimeEntriesHandlers({ seen }))
-    await tool('clickup_list_time_entries').handler({ assignee: '42' }, testContext())
+    await tool('clickup_list_time_entries').handler({ assignees: ['42'] }, testContext())
     expect(seen[0]!.get('assignee')).toBe('42')
+  })
+
+  it('joins multiple assignee ids into one comma separated parameter', async () => {
+    const seen: URLSearchParams[] = []
+    mswServer.use(...fx.listTimeEntriesHandlers({ seen }))
+    await tool('clickup_list_time_entries').handler({ assignees: ['42', '7'] }, testContext())
+    // Asserted on the outgoing request: msw's URLSearchParams.get returns
+    // the single value under the "assignee" key. If this server instead
+    // sent one "assignee" param per id (ClickUp's array-query convention
+    // used elsewhere in this codebase, e.g. space_ids[]), `seen[0]!.getAll`
+    // would report two entries and `.get` would return only the first -
+    // "42", not "42,7". The exact string here is what proves one comma
+    // separated parameter reached the API, not the array-per-key style.
+    expect(seen[0]!.get('assignee')).toBe('42,7')
+    expect(seen[0]!.getAll('assignee')).toEqual(['42,7'])
   })
 
   it('rejects a non-numeric assignee id rather than silently sending NaN', async () => {
     mswServer.use(...fx.listTimeEntriesHandlers())
     await expect(
-      tool('clickup_list_time_entries').handler({ assignee: 'not-a-number' }, testContext()),
+      tool('clickup_list_time_entries').handler({ assignees: ['not-a-number'] }, testContext()),
     ).rejects.toThrow(/not a valid ClickUp user id/)
+  })
+
+  it('sends is_billable and the space/folder/list scoping filters', async () => {
+    const seen: URLSearchParams[] = []
+    mswServer.use(...fx.listTimeEntriesHandlers({ seen }))
+    await tool('clickup_list_time_entries').handler({ is_billable: true, space_id: '1' }, testContext())
+    expect(seen[0]!.get('is_billable')).toBe('true')
+    expect(seen[0]!.get('space_id')).toBe('1')
+  })
+
+  it('always asks ClickUp to include list/folder/space names on each entry', async () => {
+    const seen: URLSearchParams[] = []
+    mswServer.use(...fx.listTimeEntriesHandlers({ seen }))
+    await tool('clickup_list_time_entries').handler({}, testContext())
+    expect(seen[0]!.get('include_location_names')).toBe('true')
+  })
+
+  it('rejects more than one of space_id/folder_id/list_id/task_id at once, matching ClickUp\'s own constraint', async () => {
+    mswServer.use(...fx.listTimeEntriesHandlers())
+    await expect(
+      tool('clickup_list_time_entries').handler({ space_id: '1', list_id: '101' }, testContext()),
+    ).rejects.toThrow(/only one of space_id, folder_id, list_id, task_id/)
   })
 
   it('paginates results, reporting has_more', async () => {
@@ -284,5 +321,31 @@ describe('clickup_list_time_entries', () => {
     const md = tool('clickup_list_time_entries').render(out, testContext())
     expect(md).toContain('Fix login redirect (86abc)')
     expect(md).toContain('3h 15m')
+  })
+
+  it("surfaces each entry's user so a caller can tell whose entry it is", async () => {
+    mswServer.use(...fx.listTimeEntriesHandlers())
+    const out = await tool('clickup_list_time_entries').handler({}, testContext())
+    expect(out.items[0]!.user).toEqual({ id: '1', username: 'Alice Anderson' })
+    const md = tool('clickup_list_time_entries').render(out, testContext())
+    expect(md).toContain('Alice Anderson')
+  })
+
+  it("surfaces an entry's list and space when ClickUp reports a task_location", async () => {
+    mswServer.use(...fx.listTimeEntriesHandlers())
+    const out = await tool('clickup_list_time_entries').handler({}, testContext())
+    expect(out.items[0]).toMatchObject({
+      list_id: '101',
+      list_name: 'Sprint 1',
+      space_id: '1',
+      space_name: 'Engineering',
+    })
+  })
+
+  it('omits list/space fields on an entry with no task_location, rather than inventing one', async () => {
+    mswServer.use(...fx.listTimeEntriesHandlers())
+    const out = await tool('clickup_list_time_entries').handler({}, testContext())
+    expect(out.items[1]).not.toHaveProperty('list_id')
+    expect(out.items[1]).not.toHaveProperty('space_id')
   })
 })

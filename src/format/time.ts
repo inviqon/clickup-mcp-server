@@ -19,6 +19,9 @@ export type TimeEntryLike = {
   start: string
   end?: string | undefined
   duration: string
+  user?: { id: string; username: string } | undefined
+  list_name?: string | undefined
+  space_name?: string | undefined
 }
 
 /**
@@ -59,6 +62,9 @@ export function timeEntryTaskLabel(out: TimeEntryTaskLabelSource): string {
 export function renderTimeEntryLines(out: TimeEntryLike): string[] {
   const lines = bulletList([
     ['Task', timeEntryTaskLabel(out)],
+    ['User', out.user !== undefined ? nameWithId(out.user.username, out.user.id) : undefined],
+    ['List', out.list_name],
+    ['Space', out.space_name],
     ['Start', out.start],
     ['End', out.end],
     ['Duration', out.duration],
@@ -80,5 +86,6 @@ export function renderTimeEntryLines(out: TimeEntryLike): string[] {
  */
 export function formatTimeEntryLine(out: TimeEntryLike): string {
   const description = out.description !== undefined && out.description.length > 0 ? `: ${out.description}` : ''
-  return `- ${timeEntryTaskLabel(out)} - ${out.duration} (started ${out.start})${description}`
+  const who = out.user !== undefined ? `${out.user.username} - ` : ''
+  return `- ${who}${timeEntryTaskLabel(out)} - ${out.duration} (started ${out.start})${description}`
 }

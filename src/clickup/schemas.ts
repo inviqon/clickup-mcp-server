@@ -555,6 +555,26 @@ export const TimeEntryTagSchema = z
   })
   .passthrough()
 
+/**
+ * Present only when the request that fetched this entry passed
+ * `include_location_names=true` (see `listTimeEntriesRaw`,
+ * src/clickup/endpoints/time.ts, which always does). ClickUp's own example
+ * for this shape reports the three ids as numbers and the three names as
+ * strings, each independently optional - a `task_location` can carry a
+ * `list_id`/`list_name` with no `folder_id`/`folder_name` at all, for an
+ * entry logged against a folderless list.
+ */
+export const TimeEntryLocationSchema = z
+  .object({
+    list_id: zId.optional(),
+    folder_id: zId.optional(),
+    space_id: zId.optional(),
+    list_name: z.string().optional(),
+    folder_name: z.string().optional(),
+    space_name: z.string().optional(),
+  })
+  .passthrough()
+
 export const TimeEntrySchema = z
   .object({
     id: z.string(),
@@ -566,6 +586,7 @@ export const TimeEntrySchema = z
     duration: z.union([z.string(), z.number()]),
     description: z.string().optional(),
     tags: z.array(TimeEntryTagSchema).default([]),
+    task_location: TimeEntryLocationSchema.optional(),
   })
   .passthrough()
 

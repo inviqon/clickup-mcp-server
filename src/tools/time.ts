@@ -32,6 +32,41 @@ const timeEntryOutputShape = {
   start: z.string(),
   end: z.string().optional(),
   duration: z.string(),
+  user: z.object({ id: z.string(), username: z.string() }).optional(),
+  list_id: z.string().optional(),
+  list_name: z.string().optional(),
+  space_id: z.string().optional(),
+  space_name: z.string().optional(),
+}
+
+/**
+ * ClickUp's own reference page for `GET /team/{teamId}/time_entries` states
+ * plainly that only one of `space_id`, `folder_id`, `list_id` or `task_id`
+ * may be given per request. Enforced here, before the request is sent,
+ * rather than left for ClickUp to reject: per reliability rule 4, an
+ * over-specified scope is an ambiguity ("which of these did you mean") this
+ * server must surface, not silently resolve by picking one and dropping the
+ * rest. Shared by `clickup_list_time_entries` and `clickup_time_report`,
+ * the two tools that both hit this endpoint.
+ */
+function assertAtMostOneLocationFilter(args: {
+  space_id?: string | undefined
+  folder_id?: string | undefined
+  list_id?: string | undefined
+  task_id?: string | undefined
+}): void {
+  const given = [
+    ['space_id', args.space_id] as const,
+    ['folder_id', args.folder_id] as const,
+    ['list_id', args.list_id] as const,
+    ['task_id', args.task_id] as const,
+  ].filter(([, value]) => value !== undefined)
+  if (given.length > 1) {
+    throw new ClickUpUsageError(
+      `ClickUp accepts only one of space_id, folder_id, list_id, task_id per request, but got ` +
+        `${given.map(([name, value]) => `${name}="${value}"`).join(' and ')}. Drop all but the one you mean.`,
+    )
+  }
 }
 
 function tagsBody(tags: string[] | undefined): { tags: Array<{ name: string }>; tag_action: 'replace' } | undefined {
@@ -223,8 +258,26 @@ export const getCurrentTimerTool: ToolDefinition<typeof getCurrentTimerInputShap
 const listTimeEntriesInputShape = {
   start_date: z.string().optional().describe('Defaults to 7 days ago when omitted'),
   end_date: z.string().optional().describe('Defaults to now when omitted'),
-  assignee: z.string().optional().describe('User id; defaults to every entry visible to this token'),
+  assignees: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'User ids; defaults to every entry visible to this token. Sent to ClickUp as one comma separated list.',
+    ),
   task_id: z.string().optional().describe('Restrict to entries logged against one task'),
+  space_id: z
+    .string()
+    .optional()
+    .describe('Restrict to entries under one space. At most one of space_id/folder_id/list_id/task_id may be given.'),
+  folder_id: z
+    .string()
+    .optional()
+    .describe('Restrict to entries under one folder. At most one of space_id/folder_id/list_id/task_id may be given.'),
+  list_id: z
+    .string()
+    .optional()
+    .describe('Restrict to entries under one list. At most one of space_id/folder_id/list_id/task_id may be given.'),
+  is_billable: z.boolean().optional().describe('true for billable entries only, false for non-billable only'),
   limit: z.number().int().min(1).max(100).default(25),
   offset: z.number().int().min(0).default(0),
 }
@@ -249,12 +302,15 @@ export const listTimeEntriesTool: ToolDefinition<typeof listTimeEntriesInputShap
     'List time entries in a date range, defaulting to the last 7 days when neither start_date nor',
     'end_date is given - the output always states which range it actually used, so a caller never',
     'has to guess. Totals the duration of the entries shown (not the whole underlying range if it is',
-    'paginated), rendered in "1h 30m" form.',
+    'paginated), rendered in "1h 30m" form. Each entry carries who logged it, and its list/space when',
+    'ClickUp reports one. Scope with at most one of space_id/folder_id/list_id/task_id - ClickUp',
+    'accepts only one at a time.',
     'Examples: "how much time did I log this week", "show time entries on task 86abc since Monday".',
   ].join(' '),
   inputSchema: listTimeEntriesInputShape,
   outputSchema: listTimeEntriesOutputShape,
   handler: async (args, ctx) => {
+    assertAtMostOneLocationFilter(args)
     const limit = args.limit ?? 25
     const offset = args.offset ?? 0
     const now = Date.now()
@@ -265,9 +321,18 @@ export const listTimeEntriesTool: ToolDefinition<typeof listTimeEntriesInputShap
         ? resolveDate(args.start_date, { timezone: ctx.timezone }).epochMs
         : resolveDate('7 days ago', { timezone: ctx.timezone, now: new Date(now) }).epochMs
     const endMs = args.end_date !== undefined ? resolveDate(args.end_date, { timezone: ctx.timezone }).epochMs : now
-    const assigneeId = args.assignee !== undefined ? toAssigneeId(args.assignee) : undefined
+    const assigneeIds = args.assignees !== undefined ? args.assignees.map(toAssigneeId) : undefined
 
-    const entries = await listTimeEntriesRaw(ctx, { startMs, endMs, assignee: assigneeId, taskId: args.task_id })
+    const entries = await listTimeEntriesRaw(ctx, {
+      startMs,
+      endMs,
+      assigneeIds,
+      taskId: args.task_id,
+      spaceId: args.space_id,
+      folderId: args.folder_id,
+      listId: args.list_id,
+      isBillable: args.is_billable,
+    })
     const outs = entries.map((e) => toTimeEntryOut(e, ctx.timezone))
     const page = paginate(outs, { offset, limit })
 
