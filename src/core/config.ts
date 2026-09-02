@@ -35,6 +35,20 @@ function requiredString(name: string) {
     .min(1, `${name} is required`)
 }
 
+/**
+ * Like `requiredString`, but accepts an empty string as present. Used only
+ * for `CLICKUP_API_KEY` (Task 17): the stdio transport still needs a real
+ * token here, but the HTTP transport's whole point is resolving credentials
+ * per request from an `Authorization` header, so a deployment that never
+ * sets a default token must still be able to call `loadConfig` at all - the
+ * env var must be present (spelling it out is a decision, not an accident),
+ * but it may deliberately be `""`. `src/bin/http.ts` is what turns an empty
+ * `apiKey` into a 401 when neither it nor a header supplies a token.
+ */
+function presentString(name: string) {
+  return z.string({ error: `${name} is required` })
+}
+
 function splitCommaList(value: string): string[] {
   return value
     .split(',')
@@ -68,7 +82,7 @@ function numberFromString(name: string, defaultValue: number) {
 }
 
 const rawConfigSchema = z.strictObject({
-  CLICKUP_API_KEY: requiredString('CLICKUP_API_KEY'),
+  CLICKUP_API_KEY: presentString('CLICKUP_API_KEY'),
   CLICKUP_TEAM_ID: requiredString('CLICKUP_TEAM_ID'),
   CLICKUP_MCP_MODE: z
     .enum(['read', 'write', 'admin'], {
