@@ -61,6 +61,12 @@ function parseResetHeader(response: Response): Date | undefined {
   return new Date(seconds * 1000)
 }
 
+/**
+ * Reads and JSON-parses a response body. Only the genuinely empty cases (204,
+ * or a zero-length body on any other status) default to `{}`. A non-empty
+ * body that fails to parse as JSON throws, so callers must decide how to
+ * treat a malformed body rather than have it silently become `{}`.
+ */
 async function readBody(response: Response): Promise<unknown> {
   if (response.status === 204) {
     return {}
@@ -69,8 +75,18 @@ async function readBody(response: Response): Promise<unknown> {
   if (text.length === 0) {
     return {}
   }
+  return JSON.parse(text) as unknown
+}
+
+/**
+ * Best-effort body read for a response we are already about to reject based
+ * on its HTTP status (429, 5xx, other non-2xx). A malformed error body only
+ * costs us the optional ECODE extraction, so it falls back to `{}` rather
+ * than masking the status-derived error we are already throwing.
+ */
+async function readErrorBody(response: Response): Promise<unknown> {
   try {
-    return JSON.parse(text) as unknown
+    return await readBody(response)
   } catch {
     return {}
   }
@@ -131,7 +147,7 @@ export class ClickUpClient {
           attempt++
           continue
         }
-        const body = await readBody(response)
+        const body = await readErrorBody(response)
         throw new ClickUpApiError('ClickUp rate limit exceeded', {
           status: response.status,
           endpoint,
@@ -146,7 +162,7 @@ export class ClickUpClient {
           await this.sleep(2 ** attempt * 100)
           continue
         }
-        const body = await readBody(response)
+        const body = await readErrorBody(response)
         throw new ClickUpApiError(`ClickUp server error (${response.status})`, {
           status: response.status,
           endpoint,
@@ -155,7 +171,7 @@ export class ClickUpClient {
       }
 
       if (!response.ok) {
-        const body = await readBody(response)
+        const body = await readErrorBody(response)
         throw new ClickUpApiError(`ClickUp API request failed (${response.status})`, {
           status: response.status,
           endpoint,
@@ -163,7 +179,18 @@ export class ClickUpClient {
         })
       }
 
-      const body = await readBody(response)
+      let body: unknown
+      try {
+        body = await readBody(response)
+      } catch {
+        // A malformed 2xx body must never silently degrade to `{}`: against a
+        // schema like z.object({}) (the brief's recommendation for delete
+        // endpoints), an empty-object fallback would parse as a valid success.
+        throw new ClickUpApiError(
+          `ClickUp returned a non-JSON body for a successful response (${response.status}) from ${endpoint}`,
+          { status: response.status, endpoint },
+        )
+      }
       const result = spec.schema.safeParse(body)
       if (!result.success) {
         const issues = result.error.issues.map((issue) => issue.path.join('.') || '(root)')

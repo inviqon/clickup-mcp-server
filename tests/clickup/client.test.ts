@@ -91,17 +91,27 @@ describe('ClickUpClient', () => {
   })
 
   it('surfaces a persistent 429 as ClickUpApiError carrying resetAt', async () => {
-    mswServer.use(http.get('https://api.clickup.com/api/v2/task/1',
-      () => new HttpResponse(null, {
+    let resetSeconds = 0
+    mswServer.use(http.get('https://api.clickup.com/api/v2/task/1', () => {
+      resetSeconds = Math.floor(Date.now() / 1000) + 1
+      return new HttpResponse(null, {
         status: 429,
-        headers: { 'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 1) },
-      })))
+        headers: { 'X-RateLimit-Reset': String(resetSeconds) },
+      })
+    }))
     const c = new ClickUpClient({
       token: 'pk_123', maxRetries: 1,
       limiter: new RateLimiter({ limitPerMinute: 1000, sleep: async () => {} }),
     })
-    await expect(c.request({ method: 'GET', path: '/task/1', schema }))
-      .rejects.toMatchObject({ status: 429 })
+    const err = await c.request({ method: 'GET', path: '/task/1', schema })
+      .then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(ClickUpApiError)
+    expect((err as ClickUpApiError).status).toBe(429)
+    // Pin resetAt to the exact millisecond value derived from the header the
+    // handler sent, not just "some Date", so a unit conversion bug (seconds
+    // mistaken for milliseconds) fails this test too.
+    expect((err as ClickUpApiError).resetAt).toBeInstanceOf(Date)
+    expect((err as ClickUpApiError).resetAt?.getTime()).toBe(resetSeconds * 1000)
   })
 
   it('raises ClickUpApiError carrying the ClickUp ECODE on 404', async () => {
@@ -116,6 +126,18 @@ describe('ClickUpClient', () => {
       () => HttpResponse.json({ id: 42 })))
     await expect(client().request({ method: 'GET', path: '/task/1', schema }))
       .rejects.toBeInstanceOf(ClickUpSchemaError)
+  })
+
+  it('rejects a 2xx response with a non-JSON body instead of treating it as empty', async () => {
+    mswServer.use(http.get('https://api.clickup.com/api/v2/list/1',
+      () => new HttpResponse('<html>not json</html>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      })))
+    // z.object({}) is the brief's recommended schema for delete-style endpoints
+    // with no payload; a corrupted body must not silently pass it as `{}`.
+    await expect(client().request({ method: 'GET', path: '/list/1', schema: z.object({}) }))
+      .rejects.toBeInstanceOf(ClickUpApiError)
   })
 
   it('never includes the token in an error message', async () => {
