@@ -27,6 +27,10 @@ Every task's requirements implicitly include this section.
 - Modern SDK APIs only: `server.registerTool`. Never `server.tool()` or manual `setRequestHandler`.
 - Default limit 25, maximum 100. Character budget default 40000.
 - TDD throughout: failing test first, minimal implementation, passing test, commit.
+- The tests a task lists are a floor, not a ceiling. Where a listed test provably
+  fails to cover the behaviour it names, add the test that does and disclose the
+  addition in the report. Reproducing a listed test verbatim while knowing it
+  proves nothing is a defect, not compliance.
 - `npm run typecheck` type-checks `tests/` as well as `src/` and `scripts/`, via
   `tsconfig.check.json`. The build tsconfig deliberately excludes `tests/` so test
   files are not emitted, and vitest transpiles with esbuild without type checking,
@@ -2072,10 +2076,10 @@ describe('clickup_get_my_day', () => {
     expect(md).toContain('## Running timer')
   })
 
-  it('issues at most four upstream requests', async () => {
+  it('issues at most five upstream requests on a cold cache', async () => {
     mswServer.use(...fx.myDayHandlers(counter))
     await run('clickup_get_my_day', {})
-    expect(counter.total).toBeLessThanOrEqual(4)
+    expect(counter.total).toBeLessThanOrEqual(5)
   })
 })
 ```
