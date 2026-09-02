@@ -245,6 +245,23 @@ export function loadWorkspaceTree(ctx: ClickUpContext): Promise<WorkspaceTree> {
   return ctx.cache.getOrLoad(`tree:${ctx.teamId}`, () => buildWorkspaceTree(ctx))
 }
 
+/**
+ * Finds the space that owns `listId` by walking an already-loaded
+ * `WorkspaceTree` - both a space's own folderless `lists` and every
+ * folder's `lists` are checked. Used by `clickup_set_task_tags` (Task 12)
+ * to resolve a task's space (task -> list -> folder -> space) without a new
+ * endpoint: the tree this walks is the same cached view
+ * `clickup_get_workspace_tree` returns, so a session that already called
+ * that tool pays nothing extra to resolve a space here.
+ */
+export function findSpaceForList(tree: WorkspaceTree, listId: string): SpaceOut | undefined {
+  return tree.spaces.find(
+    (space) =>
+      space.lists.some((list) => list.id === listId) ||
+      space.folders.some((folder) => folder.lists.some((list) => list.id === listId)),
+  )
+}
+
 export type StatusOut = {
   id?: string
   status: string

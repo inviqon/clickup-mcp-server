@@ -44,7 +44,7 @@ const customFieldsInputSchema = z.record(z.string(), z.union([z.string(), z.numb
  * so a bad id is a loud, actionable error instead of a wrong assignee no
  * one notices.
  */
-function toAssigneeId(id: string): number {
+export function toAssigneeId(id: string): number {
   const n = Number(id)
   if (Number.isNaN(n)) {
     throw new Error(
@@ -64,7 +64,7 @@ function toAssigneeId(id: string): number {
  * happen." The task id is included so the agent can look the task up
  * directly instead of retrying the write blindly.
  */
-async function refetchAfterWrite(ctx: ClickUpContext, taskId: string, whatSucceeded: string): Promise<TaskDetail> {
+export async function refetchAfterWrite(ctx: ClickUpContext, taskId: string, whatSucceeded: string): Promise<TaskDetail> {
   try {
     return await getTaskDetail(ctx, taskId)
   } catch (err) {

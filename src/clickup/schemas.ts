@@ -332,3 +332,71 @@ export const TaskSummarySchema = z.object({
 })
 
 export type TaskSummary = z.infer<typeof TaskSummarySchema>
+
+/**
+ * Comment-domain schemas (Task 12), sourced from ClickUp's "Get Task
+ * Comments", "Create Task Comment" and "Update Comment" reference pages
+ * linked from developer.clickup.com/docs/open-api-spec.md.
+ *
+ * `date` is declared as a string here deliberately: ClickUp's own docs show
+ * it as a string (an epoch-millisecond string, matching every other date
+ * field this server reads) on the comment-list shape, while the create
+ * endpoint's own response reports it as a genuine integer - the two are
+ * normalised together via a `z.union` on `date` rather than assumed to
+ * agree.
+ */
+export const CommentSchema = z
+  .object({
+    id: z.string(),
+    comment_text: z.string(),
+    user: CommentAuthorSchema,
+    date: z.union([z.string(), z.number()]),
+  })
+  .passthrough()
+
+export type Comment = z.infer<typeof CommentSchema>
+
+export const GetCommentsResponseSchema = z
+  .object({
+    comments: z.array(CommentSchema),
+  })
+  .passthrough()
+
+/**
+ * `POST /v2/task/{task_id}/comment`'s own response - a minimal
+ * acknowledgement (id, hist_id, date), not a full comment object. `date` is
+ * documented as an integer here, unlike the string form `CommentSchema`
+ * declares for the list endpoint - accepted as either rather than assumed
+ * to match, the same normalisation `CommentSchema.date` applies.
+ */
+export const CreateCommentResponseSchema = z
+  .object({
+    id: z.string(),
+    hist_id: z.string(),
+    date: z.union([z.string(), z.number()]),
+  })
+  .passthrough()
+
+/**
+ * Tag-domain schemas (Task 12), sourced from ClickUp's "Get Space Tags",
+ * "Add Tag To Task" and "Remove Tag From Task" reference pages.
+ * `tag_fg`/`tag_bg` are declared optional even though ClickUp's own spec
+ * marks them required: a workspace-created tag has always carried both in
+ * practice, but nothing in this server depends on that holding forever, and
+ * treating them as optional costs nothing since only `name` is ever read.
+ */
+export const SpaceTagSchema = z
+  .object({
+    name: z.string(),
+    tag_fg: z.string().optional(),
+    tag_bg: z.string().optional(),
+  })
+  .passthrough()
+
+export type SpaceTag = z.infer<typeof SpaceTagSchema>
+
+export const GetSpaceTagsResponseSchema = z
+  .object({
+    tags: z.array(SpaceTagSchema),
+  })
+  .passthrough()
