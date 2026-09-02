@@ -1,8 +1,8 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import type { ServerResponse } from 'node:http'
-import { createHttpServer, failRequest, MAX_BODY_BYTES } from '../src/bin/http.js'
+import { createHttpServer, failRequest, logReadiness, MAX_BODY_BYTES } from '../src/bin/http.js'
 import { loadConfig } from '../src/core/config.js'
 
 /**
@@ -302,5 +302,25 @@ describe('failRequest', () => {
     failRequest(res, 500, 'boom')
     expect(calls.destroy).toBe(0)
     expect(calls.writeHead.length).toBe(0)
+  })
+})
+
+describe('logReadiness', () => {
+  const base = { CLICKUP_API_KEY: 'pk_123', CLICKUP_TEAM_ID: '9007' }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('suppresses the readiness line when LOG_LEVEL=warn', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    logReadiness(loadConfig({ ...base, LOG_LEVEL: 'warn' }))
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('keeps the readiness line when LOG_LEVEL=debug', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    logReadiness(loadConfig({ ...base, LOG_LEVEL: 'debug' }))
+    expect(spy).toHaveBeenCalledWith('clickup-mcp-http ready: listening on 127.0.0.1:3000, mode=write')
   })
 })

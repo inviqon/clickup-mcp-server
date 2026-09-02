@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { loadConfig, type ServerConfig } from '../core/config.js'
+import { logStderr } from '../core/logger.js'
 import { ALL_TOOLS } from '../tools/index.js'
 import { buildServer } from '../server.js'
 import { TenantStore } from '../http/tenant-store.js'
@@ -230,6 +231,20 @@ export function createHttpServer(config: ServerConfig): Server {
   })
 }
 
+/**
+ * The HTTP transport's startup readiness line, gated by `LOG_LEVEL` (Task
+ * 19 follow-up to Task 18): `info` level, so `LOG_LEVEL=warn` or `error`
+ * suppresses it while the default `info` and `debug` both keep it. Exported
+ * so its gating can be tested directly rather than only by inspection.
+ */
+export function logReadiness(config: ServerConfig): void {
+  logStderr(
+    config.logLevel,
+    'info',
+    `clickup-mcp-http ready: listening on ${config.httpHost}:${config.httpPort}, mode=${config.mode}`,
+  )
+}
+
 // Only binds a socket when this module is run directly as the
 // `clickup-mcp-http` entry point - never as a side effect of importing
 // `createHttpServer` from a test.
@@ -239,7 +254,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   httpServer.listen(config.httpPort, config.httpHost, () => {
     // Binding anywhere other than the loopback default is an explicit
     // choice (CLICKUP_HTTP_HOST), and the address it actually bound to is
-    // named here on stderr so that choice is never silent.
-    console.error(`clickup-mcp-http ready: listening on ${config.httpHost}:${config.httpPort}, mode=${config.mode}`)
+    // named here on stderr so that choice is never silent - subject to the
+    // same LOG_LEVEL gate as every other startup line.
+    logReadiness(config)
   })
 }

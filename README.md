@@ -76,7 +76,7 @@ copy-pasteable template.
 | `CLICKUP_HTTP_PORT` | `3000` | HTTP transport only: port to listen on. |
 | `CLICKUP_HTTP_HOST` | `127.0.0.1` | HTTP transport only: host to bind to. Binding anywhere other than loopback is a deliberate choice - see [Security](#security-and-known-limits). |
 | `CLICKUP_ALLOWED_ORIGINS` | none | HTTP transport only: comma separated list of `Origin` header values to accept. A request with no `Origin` header at all is always allowed (non-browser MCP clients never send one); a request that *does* carry an `Origin` is rejected unless it is in this list. |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. Parsed and validated at startup; as of this version no logger in `src/` actually reads it, so it currently has no observable effect beyond rejecting an invalid value. Flagged here rather than left to be discovered. |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. Gates the startup readiness line each transport writes to stderr (`src/core/logger.ts`): a message is written when its level is at or above `LOG_LEVEL`, so `LOG_LEVEL=warn` or `error` suppresses the readiness line while the default `info` and `debug` both keep it. This server never writes to stdout (`console.log` is forbidden under `src/`), and it has no other log lines yet - this is the one thing `LOG_LEVEL` currently controls. |
 
 ## Client configuration
 

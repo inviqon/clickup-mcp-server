@@ -2,6 +2,7 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { loadConfig, type ServerConfig } from '../core/config.js'
 import { createContext } from '../core/context.js'
+import { logStderr } from '../core/logger.js'
 import { ALL_TOOLS } from '../tools/index.js'
 import { buildServer } from '../server.js'
 
@@ -27,6 +28,17 @@ export function assertApiKeyPresent(config: Pick<ServerConfig, 'apiKey'>): void 
   }
 }
 
+/**
+ * The stdio transport's startup readiness line, gated by `LOG_LEVEL` (Task
+ * 19 follow-up to Task 18): `info` level, so `LOG_LEVEL=warn` or `error`
+ * suppresses it while the default `info` and `debug` both keep it. Exported
+ * so its gating can be tested directly, the same reason `assertApiKeyPresent`
+ * is pulled out of the module-execution guard below rather than inlined.
+ */
+export function logReadiness(config: ServerConfig): void {
+  logStderr(config.logLevel, 'info', `clickup-mcp ready: mode=${config.mode}`)
+}
+
 // Only runs when this module is executed directly as the `clickup-mcp`
 // entry point - never as a side effect of importing `assertApiKeyPresent`
 // from a test, the same guard `src/bin/http.ts` uses for the same reason.
@@ -36,5 +48,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const context = createContext(config)
   const server = buildServer({ tools: ALL_TOOLS, config, contextFactory: () => context })
   await server.connect(new StdioServerTransport())
-  console.error(`clickup-mcp ready: mode=${config.mode}`)
+  logReadiness(config)
 }
