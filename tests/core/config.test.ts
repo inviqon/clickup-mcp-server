@@ -43,6 +43,19 @@ describe('loadConfig', () => {
     expect(c.allowedOrigins).toEqual(['https://a.example', 'https://b.example'])
   })
 
+  // A zero rate limit used to pass validation, then make RateLimiter's
+  // refillPerMs zero and every computed wait Infinity - the server started
+  // cleanly and hung on the first tool call with nothing said about why.
+  it('rejects a zero rate limit rather than accepting a limiter that can never refill', () => {
+    expect(() => loadConfig({ ...base, CLICKUP_RATE_LIMIT: '0' }))
+      .toThrow(/CLICKUP_RATE_LIMIT must be greater than 0/)
+  })
+
+  it('rejects a negative rate limit', () => {
+    expect(() => loadConfig({ ...base, CLICKUP_RATE_LIMIT: '-5' }))
+      .toThrow(/CLICKUP_RATE_LIMIT must be greater than 0/)
+  })
+
   it('accepts a valid custom numeric override', () => {
     const c = loadConfig({ ...base, CLICKUP_RATE_LIMIT: '250' })
     expect(c.rateLimit).toBe(250)

@@ -63,7 +63,15 @@ function optionalList() {
     .transform((value) => (value === undefined ? [] : splitCommaList(value)))
 }
 
-function numberFromString(name: string, defaultValue: number) {
+/**
+ * `opts.positive` rejects zero and negatives outright rather than letting
+ * them through as a "valid number". `CLICKUP_RATE_LIMIT=0` is the case that
+ * makes this necessary: it makes `RateLimiter`'s `refillPerMs` zero, and
+ * every computed wait therefore `Infinity` - a server that accepts its
+ * configuration, starts cleanly, and then hangs forever on the first tool
+ * call with nothing said about why.
+ */
+function numberFromString(name: string, defaultValue: number, opts: { positive?: boolean } = {}) {
   return z
     .string()
     .optional()
@@ -74,6 +82,13 @@ function numberFromString(name: string, defaultValue: number) {
         ctx.addIssue({
           code: 'custom',
           message: `${name} must be a number, got ${JSON.stringify(value)}`,
+        })
+        return z.NEVER
+      }
+      if (opts.positive === true && parsed <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `${name} must be greater than 0, got ${JSON.stringify(value)}`,
         })
         return z.NEVER
       }
@@ -94,7 +109,7 @@ const rawConfigSchema = z.strictObject({
   CLICKUP_DISABLED_TOOLS: optionalList(),
   CLICKUP_TIMEZONE: z.string().optional().default(Intl.DateTimeFormat().resolvedOptions().timeZone),
   CLICKUP_CACHE_TTL_SECONDS: numberFromString('CLICKUP_CACHE_TTL_SECONDS', 300),
-  CLICKUP_RATE_LIMIT: numberFromString('CLICKUP_RATE_LIMIT', 100),
+  CLICKUP_RATE_LIMIT: numberFromString('CLICKUP_RATE_LIMIT', 100, { positive: true }),
   CLICKUP_MAX_RESPONSE_CHARS: numberFromString('CLICKUP_MAX_RESPONSE_CHARS', 40000),
   CLICKUP_HTTP_PORT: numberFromString('CLICKUP_HTTP_PORT', 3000),
   CLICKUP_HTTP_HOST: z.string().optional().default('127.0.0.1'),
