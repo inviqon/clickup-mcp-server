@@ -59,10 +59,61 @@ function offsetMinutesAt(epochMs: number, timezone: string): number {
 }
 
 /**
- * Builds the epoch milliseconds for a given wall-clock date/time in `timezone`,
- * resolving the timezone offset by iterating once (DST transitions can shift
- * the offset a single time near the boundary, so a fixed point is reached
- * after at most two passes).
+ * Returns year/month/day/hour/minute/second in `timezone` for the given
+ * instant, in one Intl call.
+ */
+function zonedDateTimeParts(
+  epochMs: number,
+  timezone: string,
+): { year: number; month: number; day: number; hour: number; minute: number; second: number } {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+  const parts = formatter.formatToParts(new Date(epochMs))
+  const get = (type: string): number => {
+    const part = parts.find((p) => p.type === type)
+    if (part === undefined) {
+      throw new Error(`Could not read "${type}" for timezone "${timezone}"`)
+    }
+    return Number(part.value)
+  }
+  const hour = get('hour')
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: hour === 24 ? 0 : hour,
+    minute: get('minute'),
+    second: get('second'),
+  }
+}
+
+/**
+ * Builds the epoch milliseconds for a given wall-clock date/time in
+ * `timezone`.
+ *
+ * DST is handled explicitly rather than incidentally: the offset in effect
+ * at the start and at the end of the target calendar day brackets any
+ * single DST transition within that day, giving up to two candidate
+ * instants. Each candidate is checked by reformatting it back through
+ * `timezone` and comparing against the requested wall clock:
+ *   - No candidate matches -> the wall clock time does not exist (a
+ *     spring-forward gap, e.g. Berlin's 2026-03-29 02:30). Returns `null`
+ *     so the caller can fail loudly instead of silently rolling over to a
+ *     different hour, which is exactly the failure mode this module exists
+ *     to prevent.
+ *   - Both candidates match -> the wall clock time is ambiguous (a
+ *     fall-back repeated hour, e.g. Berlin's 2026-10-25 02:30, which occurs
+ *     once in CEST and once in CET). This deliberately resolves to the
+ *     EARLIER of the two instants (the occurrence before the transition).
+ *   - Otherwise there is exactly one match, the normal case.
  */
 function zonedTimeToEpoch(
   year: number,
@@ -72,17 +123,28 @@ function zonedTimeToEpoch(
   minute: number,
   second: number,
   timezone: string,
-): number {
-  let guessEpoch = Date.UTC(year, month - 1, day, hour, minute, second)
-  for (let i = 0; i < 2; i++) {
-    const offsetMinutes = offsetMinutesAt(guessEpoch, timezone)
-    const candidate = Date.UTC(year, month - 1, day, hour, minute, second) - offsetMinutes * 60_000
-    if (candidate === guessEpoch) {
-      return candidate
-    }
-    guessEpoch = candidate
+): number | null {
+  const naiveUtc = Date.UTC(year, month - 1, day, hour, minute, second)
+  const offsetAtStart = offsetMinutesAt(Date.UTC(year, month - 1, day, 0, 0, 0), timezone)
+  const offsetAtEnd = offsetMinutesAt(Date.UTC(year, month - 1, day, 23, 59, 0), timezone)
+  const candidateEpochs = Array.from(
+    new Set([naiveUtc - offsetAtStart * 60_000, naiveUtc - offsetAtEnd * 60_000]),
+  )
+  const matches = candidateEpochs.filter((candidate) => {
+    const parts = zonedDateTimeParts(candidate, timezone)
+    return (
+      parts.year === year &&
+      parts.month === month &&
+      parts.day === day &&
+      parts.hour === hour &&
+      parts.minute === minute &&
+      parts.second === second
+    )
+  })
+  if (matches.length === 0) {
+    return null
   }
-  return guessEpoch
+  return Math.min(...matches)
 }
 
 function formatOffset(offsetMinutes: number): string {
@@ -150,6 +212,19 @@ function addDaysToYmd(
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
 }
 
+/**
+ * Whether year/month/day form a real calendar date. `Date.parse` alone is
+ * not a sufficient check: it normalizes out-of-range days (e.g.
+ * "2026-02-30" silently becomes 2026-03-02) instead of rejecting them.
+ */
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) {
+    return false
+  }
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return day <= daysInMonth
+}
+
 const PARSE_ERROR_SUFFIX =
   'Accepted: epoch milliseconds, ISO 8601, "today", "tomorrow", "next monday", "in 3 days".'
 
@@ -177,8 +252,16 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
     return { epochMs, iso: formatDate(epochMs, timezone) }
   }
 
-  const isoCandidate = Date.parse(trimmed)
-  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed) && !Number.isNaN(isoCandidate)) {
+  const isoDateMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (isoDateMatch !== null) {
+    const [, yearStr, monthStr, dayStr] = isoDateMatch as [string, string, string, string]
+    if (!isValidCalendarDate(Number(yearStr), Number(monthStr), Number(dayStr))) {
+      throw parseError(input)
+    }
+    const isoCandidate = Date.parse(trimmed)
+    if (Number.isNaN(isoCandidate)) {
+      throw parseError(input)
+    }
     return { epochMs: isoCandidate, iso: formatDate(isoCandidate, timezone) }
   }
 
@@ -191,7 +274,13 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
     const baseYmd = addDaysToYmd(zonedYmd(now.getTime(), timezone), dayOffset)
     const hour = hourStr !== undefined ? Number(hourStr) : 0
     const minute = minuteStr !== undefined ? Number(minuteStr) : 0
+    if (hour > 23 || minute > 59) {
+      throw parseError(input)
+    }
     const epochMs = zonedTimeToEpoch(baseYmd.year, baseYmd.month, baseYmd.day, hour, minute, 0, timezone)
+    if (epochMs === null) {
+      throw parseError(input)
+    }
     return { epochMs, iso: formatDate(epochMs, timezone) }
   }
 
@@ -213,6 +302,9 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
     }
     const targetYmd = addDaysToYmd(todayYmd, deltaDays)
     const epochMs = zonedTimeToEpoch(targetYmd.year, targetYmd.month, targetYmd.day, 0, 0, 0, timezone)
+    if (epochMs === null) {
+      throw parseError(input)
+    }
     return { epochMs, iso: formatDate(epochMs, timezone) }
   }
 
@@ -220,13 +312,42 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
   const relativeAgo = lower.match(/^(\d+)\s+(minutes?|hours?|days?|weeks?)\s+ago$/)
   const relativeMatch = relative ?? relativeAgo
   if (relativeMatch !== null) {
-    const [, amountStr, unit] = relativeMatch as [string, string, string]
+    const [, amountStr, unitWord] = relativeMatch as [string, string, string]
     const amount = Number(amountStr)
-    const unitMs = DURATION_UNIT_MS[unit]
+    const unitMs = DURATION_UNIT_MS[unitWord]
     if (unitMs === undefined) {
       throw parseError(input)
     }
     const sign = relative !== null ? 1 : -1
+    const isCalendarUnit = unitWord.startsWith('day') || unitWord.startsWith('week')
+    if (isCalendarUnit) {
+      // Calendar-day arithmetic, same as "today"/"tomorrow": keep the same
+      // wall-clock time in `timezone`. Raw millisecond addition (used below
+      // for hours/minutes) would silently drift by an hour whenever the
+      // span crosses a DST boundary.
+      const days = unitWord.startsWith('week') ? amount * 7 : amount
+      const nowParts = zonedDateTimeParts(now.getTime(), timezone)
+      const targetYmd = addDaysToYmd(
+        { year: nowParts.year, month: nowParts.month, day: nowParts.day },
+        sign * days,
+      )
+      const epochMs = zonedTimeToEpoch(
+        targetYmd.year,
+        targetYmd.month,
+        targetYmd.day,
+        nowParts.hour,
+        nowParts.minute,
+        nowParts.second,
+        timezone,
+      )
+      if (epochMs === null) {
+        throw parseError(input)
+      }
+      return { epochMs, iso: formatDate(epochMs, timezone) }
+    }
+    // Elapsed-time units (hours/minutes): raw millisecond addition is
+    // correct here, since "2 hours" means 7,200,000 ms of elapsed time
+    // regardless of any DST boundary crossed in between.
     const epochMs = now.getTime() + sign * amount * unitMs
     return { epochMs, iso: formatDate(epochMs, timezone) }
   }
