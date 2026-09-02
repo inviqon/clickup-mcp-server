@@ -383,3 +383,27 @@ export function parseDuration(input: string | number): number {
   const minutes = match[2] !== undefined ? Number(match[2]) : 0
   return hours * 3_600_000 + minutes * 60_000
 }
+
+/**
+ * Formats a millisecond duration as "1h 30m" (or "45m" / "2h" when one part
+ * is zero, "0m" for a zero duration). The inverse of `parseDuration`'s
+ * milliseconds-in direction, and the only place this server should ever
+ * turn a duration into text: this project has already shipped three
+ * separate defects where a date or duration reached the agent unformatted,
+ * and a raw millisecond count (or ClickUp's own negative-while-running
+ * convention) is exactly that class of bug. Negative input (ClickUp's
+ * convention for "still running") is rendered using its absolute value,
+ * since an elapsed duration is never itself negative.
+ */
+export function formatDurationHm(ms: number): string {
+  const totalMinutes = Math.round(Math.abs(ms) / 60_000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours === 0) {
+    return `${minutes}m`
+  }
+  if (minutes === 0) {
+    return `${hours}h`
+  }
+  return `${hours}h ${minutes}m`
+}

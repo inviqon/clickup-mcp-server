@@ -4,6 +4,7 @@ import { TASK_TOOLS } from './tasks.js'
 import { COMMENT_TOOLS } from './comments.js'
 import { TAG_TOOLS } from './tags.js'
 import { STRUCTURE_TOOLS } from './structure.js'
+import { TIME_TOOLS } from './time.js'
 
 /**
  * The full tool set the server can offer. Tasks 10-16 each append their own
@@ -17,4 +18,5 @@ export const ALL_TOOLS: AnyToolDefinition[] = [
   ...COMMENT_TOOLS,
   ...TAG_TOOLS,
   ...STRUCTURE_TOOLS,
+  ...TIME_TOOLS,
 ]

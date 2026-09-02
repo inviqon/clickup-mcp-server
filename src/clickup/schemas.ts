@@ -448,3 +448,99 @@ export const ListWriteResponseSchema = z
   .passthrough()
 
 export type ListWriteResponse = z.infer<typeof ListWriteResponseSchema>
+
+/**
+ * Time-domain schemas (Task 14), sourced from ClickUp's "Start a Time
+ * Entry", "Stop a Time Entry", "Get Running Time Entry", "Get Time Entries
+ * Within a Date Range", "Create a Time Entry", "Update a Time Entry" and
+ * "Delete a Time Entry" reference pages (developer.clickup.com/reference/
+ * start|stop|create|update|deleteatimeentry.md, gettimeentrieswithinadaterange.md,
+ * getrunningtimeentry.md).
+ *
+ * `start`/`end`/`duration`/`at` are all declared as string-or-number unions:
+ * ClickUp's own docs disagree with each other on whether these are strings
+ * or integers across this endpoint family (list entries document `duration`
+ * as a string; start/stop/create document it as an integer), and a running
+ * entry's `duration` is additionally documented as *negative* - "a time
+ * entry that has a negative duration means that timer is currently running
+ * for that user." Accepted as either shape rather than assumed to agree,
+ * the same normalisation `TaskCommentSchema.date` and `zId` apply elsewhere
+ * in this file.
+ */
+export const TimeEntryUserSchema = z
+  .object({
+    id: zId,
+    username: z.string(),
+  })
+  .passthrough()
+
+/**
+ * A time entry's nested task, present only when the entry is associated
+ * with one - `tid` is optional on every write endpoint, and ClickUp's own
+ * examples show `task: null` for an untracked (task-less) entry.
+ */
+export const TimeEntryTaskRefSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    status: TaskStatusSchema.optional(),
+  })
+  .passthrough()
+
+export const TimeEntryTagSchema = z
+  .object({
+    name: z.string(),
+  })
+  .passthrough()
+
+export const TimeEntrySchema = z
+  .object({
+    id: z.string(),
+    task: TimeEntryTaskRefSchema.nullable().optional(),
+    user: TimeEntryUserSchema.optional(),
+    billable: z.boolean().optional(),
+    start: z.union([z.string(), z.number()]),
+    end: z.union([z.string(), z.number()]).nullable().optional(),
+    duration: z.union([z.string(), z.number()]),
+    description: z.string().optional(),
+    tags: z.array(TimeEntryTagSchema).default([]),
+  })
+  .passthrough()
+
+export type TimeEntry = z.infer<typeof TimeEntrySchema>
+
+/**
+ * `GET .../time_entries/current`'s own response: `data` is `null` when
+ * nothing is running, a `TimeEntry` otherwise. Kept separate from
+ * `TimeEntryResponseSchema` below because "absent" and "present but this
+ * shape" are different questions here - the write endpoints never return a
+ * null entry, only this one can.
+ */
+export const RunningTimeEntryResponseSchema = z
+  .object({
+    data: TimeEntrySchema.nullable(),
+  })
+  .passthrough()
+
+/**
+ * The shared response shape for start/stop/create/update: ClickUp's own
+ * reference pages disagree on whether these wrap the entry in a `data`
+ * property (start, stop and delete are documented and consistently
+ * wrapped; create's own example shows the entry unwrapped, and update's
+ * page documents no shape at all). Accepted as either - the wrapped form is
+ * unwrapped by the transform, the bare form passes through as-is - rather
+ * than assumed to match only the documented common case.
+ */
+export const TimeEntryResponseSchema = z.union([
+  z
+    .object({ data: TimeEntrySchema })
+    .passthrough()
+    .transform((v) => v.data),
+  TimeEntrySchema,
+])
+
+export const GetTimeEntriesResponseSchema = z
+  .object({
+    data: z.array(TimeEntrySchema),
+  })
+  .passthrough()
