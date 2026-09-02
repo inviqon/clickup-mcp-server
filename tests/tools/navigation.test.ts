@@ -245,6 +245,17 @@ describe('clickup_search_tasks', () => {
     expect(out.items.map((t: { id: string }) => t.id).sort()).toEqual(['9hx', '9hy'])
   })
 
+  it('formats due_date with the configured timezone offset, not raw epoch ms or a bare UTC ISO string (Finding B)', async () => {
+    mswServer.use(...fx.searchHandlers())
+    const out = await tool('clickup_search_tasks').handler({ query: 'login bug' }, testContext())
+    const withDueDate = out.items.find((t: { id: string }) => t.id === '9hx')
+    // TASK_LOGIN_BUG's due_date (1508369194377ms) falls in Berlin's DST
+    // window (2017-10-19, before the Oct 29 changeover) - CEST, +02:00.
+    expect(withDueDate.due_date).toMatch(/\+02:00$/)
+    expect(withDueDate.due_date).not.toBe('1508369194377')
+    expect(withDueDate.due_date).not.toMatch(/Z$/)
+  })
+
   it('walks a second upstream page rather than only ever considering the first 100 candidate tasks (Finding 3)', async () => {
     mswServer.use(...fx.pagedSearchHandlers())
     const out = await tool('clickup_search_tasks').handler({ query: 'target' }, testContext())

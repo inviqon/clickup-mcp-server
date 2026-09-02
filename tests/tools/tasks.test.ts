@@ -268,6 +268,16 @@ describe('clickup_create_task', () => {
       tool('clickup_create_task').handler({ list_id: '100', name: 'x', assignees: ['not-a-number'] }, testContext()),
     ).rejects.toThrow(/"not-a-number".*not a valid ClickUp user id.*clickup_resolve_member/)
   })
+
+  it('distinguishes "create succeeded, confirmation read failed" from an ordinary failure (Finding A)', async () => {
+    mswServer.use(...fx.listMetaHandlers(), ...fx.createSucceedsThenRefetchFailsHandlers())
+    await expect(
+      tool('clickup_create_task').handler(
+        { list_id: '100', name: 'x', custom_fields: { Client: 'Selectry' } },
+        testContext(),
+      ),
+    ).rejects.toThrow(/succeeded, but reading task 86new back afterward failed.*already happened/)
+  })
 })
 
 describe('clickup_update_task', () => {
@@ -358,6 +368,16 @@ describe('clickup_update_task', () => {
     expect(out.id).toBe('86abc')
     expect(out.custom_field_errors).toHaveLength(1)
     expect(out.custom_field_errors[0]).toMatchObject({ field: 'Client' })
+  })
+
+  it('distinguishes "update succeeded, confirmation read failed" from an ordinary failure (Finding A)', async () => {
+    mswServer.use(...fx.listMetaHandlers(), ...fx.updateSucceedsThenRefetchFailsHandlers())
+    await expect(
+      tool('clickup_update_task').handler(
+        { task_id: '86abc', custom_fields: { Client: 'Selectry' } },
+        testContext(),
+      ),
+    ).rejects.toThrow(/succeeded, but reading task 86abc back afterward failed.*already happened/)
   })
 })
 

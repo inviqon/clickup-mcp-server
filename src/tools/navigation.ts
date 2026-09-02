@@ -8,6 +8,8 @@ import {
   loadWorkspaceTree,
 } from '../clickup/endpoints/workspace.js'
 import type { MemberUser, Task } from '../clickup/schemas.js'
+import { TaskSummarySchema } from '../clickup/schemas.js'
+import { toTaskSummary } from '../clickup/endpoints/tasks.js'
 import { nameWithId, paginate } from '../format/common.js'
 import { boundPage } from '../clickup/pagination.js'
 import { renderWorkspaceTree } from '../format/tree.js'
@@ -215,22 +217,22 @@ const searchTasksInputShape = {
   offset: z.number().int().min(0).default(0).describe('Number of matching tasks to skip'),
 }
 
-const taskSummaryOutputShape = z.object({
-  id: z.string(),
-  name: z.string(),
-  status: z.string(),
-  list_id: z.string(),
-  list_name: z.string(),
-  url: z.string(),
-  due_date: z.string().optional(),
-})
-
+/**
+ * `items` uses the shared `TaskSummarySchema` (src/clickup/schemas.ts) and
+ * `toTaskSummary` (src/clickup/endpoints/tasks.ts) - not a local copy of
+ * either. This tool used to carry its own `toTaskSummary` that formatted
+ * `due_date` via `new Date(...).toISOString()` (always UTC, ignoring
+ * `ctx.timezone`), a third rendering of the same field alongside
+ * `toTaskOut`'s and the (fixed) endpoint-layer `toTaskSummary`'s
+ * timezone-offset format. One shared implementation means a task's due
+ * date reads the same no matter which tool produced it.
+ */
 const searchTasksOutputShape = {
   query: z.string(),
   total: z.number(),
   count: z.number(),
   offset: z.number(),
-  items: z.array(taskSummaryOutputShape),
+  items: z.array(TaskSummarySchema),
   has_more: z.boolean(),
   next_offset: z.number().optional(),
   /**
@@ -240,21 +242,6 @@ const searchTasksOutputShape = {
    * matched, not the true count in the workspace, whenever this is true.
    */
   bounded: z.boolean().optional(),
-}
-
-type TaskSummary = z.infer<typeof taskSummaryOutputShape>
-
-function toTaskSummary(task: Task): TaskSummary {
-  const due = task.due_date != null ? new Date(Number(task.due_date)).toISOString() : undefined
-  return {
-    id: task.id,
-    name: task.name,
-    status: task.status.status,
-    list_id: task.list.id,
-    list_name: task.list.name,
-    url: task.url,
-    ...(due !== undefined ? { due_date: due } : {}),
-  }
 }
 
 function taskMatches(task: Task, query: string): boolean {
@@ -285,7 +272,7 @@ export const searchTasksTool: ToolDefinition<typeof searchTasksInputShape, typeo
       includeClosed: include_closed,
     })
     const matched = tasks.filter((t) => taskMatches(t, query))
-    const page = boundPage(paginate(matched.map(toTaskSummary), { offset, limit }), { hasMoreUpstream })
+    const page = boundPage(paginate(matched.map((t) => toTaskSummary(t, ctx.timezone)), { offset, limit }), { hasMoreUpstream })
     return { query, ...page, ...(truncated ? { bounded: true } : {}) }
   },
   render: (out) => {

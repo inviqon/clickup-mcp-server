@@ -509,6 +509,44 @@ export function linkRefetchFailsHandlers() {
   return [http.get(`${API}/v2/task/${TASK_ID}`, () => HttpResponse.json({ err: 'Server error' }, { status: 500 }))]
 }
 
+/**
+ * POST /v2/list/100/task and its custom-field write both succeed, but the
+ * confirmation GET /v2/task/86new that `clickup_create_task` performs
+ * afterward fails - unlike update, create has no earlier successful GET to
+ * this task id, so (like link) a single always-failing handler is enough.
+ */
+export function createSucceedsThenRefetchFailsHandlers() {
+  return [
+    http.post(`${API}/v2/list/${LIST_ID}/task`, () => HttpResponse.json(createdTask())),
+    http.post(`${API}/v2/task/86new/field/cf-1`, () => HttpResponse.json({})),
+    http.get(`${API}/v2/task/86new`, () => HttpResponse.json({ err: 'Server error', ECODE: 'SRV_001' }, { status: 500 })),
+  ]
+}
+
+/**
+ * PUT /v2/task/86abc and its custom-field write both succeed. GET
+ * /v2/task/86abc succeeds on its first call (the pre-update fetch of
+ * `current`, needed for the append-description base text and the list id)
+ * and fails on every call after that (the post-write confirmation read) -
+ * same call-counted shape as `moveSucceedsThenRefetchFailsHandlers`, for
+ * the same reason: `clickup_update_task` also reads the task before it
+ * writes to it.
+ */
+export function updateSucceedsThenRefetchFailsHandlers() {
+  let calls = 0
+  return [
+    http.get(`${API}/v2/task/${TASK_ID}`, () => {
+      calls += 1
+      if (calls === 1) {
+        return HttpResponse.json(baseTask())
+      }
+      return HttpResponse.json({ err: 'Server error', ECODE: 'SRV_001' }, { status: 500 })
+    }),
+    http.put(`${API}/v2/task/${TASK_ID}`, () => HttpResponse.json(baseTask())),
+    http.post(`${API}/v2/task/${TASK_ID}/field/cf-1`, () => HttpResponse.json({})),
+  ]
+}
+
 // -- Link / dependency fixtures --------------------------------------------------
 
 export type LinkCall = { path?: string; body?: unknown }

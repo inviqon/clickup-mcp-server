@@ -400,7 +400,17 @@ export const createTaskTool: ToolDefinition<typeof createTaskInputShape, typeof 
 
     // Re-read the task so the returned custom_fields reflect what was
     // actually written, not the pre-field-write snapshot from `created`.
-    const refetched = await getTaskDetail(ctx, created.id)
+    // Routed through refetchAfterWrite, not a bare getTaskDetail: the task
+    // (and possibly some or all of its custom fields) already exist in
+    // ClickUp by this point, so a transient failure on THIS read must not
+    // present as an undecorated error that loses the task id - the same
+    // failure mode Finding 2 already fixed for the field writes themselves
+    // would otherwise reopen one step later.
+    const whatSucceeded =
+      customFieldErrors.length > 0
+        ? `Creating the task (${customFieldErrors.length} of ${resolvedFields.length} custom field write(s) failed, named below)`
+        : `Creating the task and writing its ${resolvedFields.length} custom field(s)`
+    const refetched = await refetchAfterWrite(ctx, created.id, whatSucceeded)
     const out = toTaskOut(refetched, ctx)
     if (customFieldErrors.length > 0) {
       out.custom_field_errors = customFieldErrors
@@ -510,7 +520,13 @@ export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof 
       }
     })
 
-    const refetched = await getTaskDetail(ctx, args.task_id)
+    // See clickup_create_task above for why this goes through
+    // refetchAfterWrite rather than a bare getTaskDetail.
+    const whatSucceeded =
+      customFieldErrors.length > 0
+        ? `Updating the task (${customFieldErrors.length} of ${resolvedFields.length} custom field write(s) failed, named below)`
+        : `Updating the task and writing its ${resolvedFields.length} custom field(s)`
+    const refetched = await refetchAfterWrite(ctx, args.task_id, whatSucceeded)
     const out = toTaskOut(refetched, ctx)
     if (customFieldErrors.length > 0) {
       out.custom_field_errors = customFieldErrors
