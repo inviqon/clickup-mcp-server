@@ -146,7 +146,7 @@ const FIELD_CLIENT = {
   type_config: {
     options: [
       { id: 'opt-acme', name: 'Acme Inc', color: '#3366ff', orderindex: 0 },
-      { id: 'opt-selectry', name: 'Selectry', color: '#ff3333', orderindex: 1 },
+      { id: 'opt-northwind', name: 'Northwind', color: '#ff3333', orderindex: 1 },
     ],
   },
   date_created: '1566400407303',

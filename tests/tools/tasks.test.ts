@@ -83,7 +83,7 @@ describe('clickup_get_task', () => {
     expect(md).toContain('**Tags**: release')
     expect(md).toContain('**Priority**: high')
     expect(md).toContain('Bob Baker (2)')
-    expect(md).toContain('Client (cf-1): Selectry')
+    expect(md).toContain('Client (cf-1): Northwind')
     expect(md).toContain('**Bob Baker**')
     expect(md).toContain('Tagged and shipped.')
     expect(md).toMatch(/\+02:00/)
@@ -215,7 +215,7 @@ describe('clickup_create_task', () => {
     mswServer.use(...fx.listMetaHandlers())
     await expect(
       tool('clickup_create_task').handler(
-        { list_id: '100', name: 'x', custom_fields: { Kunde: 'Selectry' } },
+        { list_id: '100', name: 'x', custom_fields: { Kunde: 'Northwind' } },
         testContext(),
       ),
     ).rejects.toThrow(/no custom field "Kunde".*Client/)
@@ -225,7 +225,7 @@ describe('clickup_create_task', () => {
     const seen: string[] = []
     mswServer.use(...fx.listMetaHandlers(), ...fx.createWithFieldHandlers(seen))
     await tool('clickup_create_task').handler(
-      { list_id: '100', name: 'x', custom_fields: { Client: 'Selectry' } },
+      { list_id: '100', name: 'x', custom_fields: { Client: 'Northwind' } },
       testContext(),
     )
     expect(seen).toContain('/v2/task/86new/field/cf-1')
@@ -249,18 +249,18 @@ describe('clickup_create_task', () => {
   it('returns the re-fetched task with the custom field actually populated, not the pre-write snapshot (Finding 2)', async () => {
     mswServer.use(...fx.listMetaHandlers(), ...fx.createWithFieldHandlers([]))
     const out = await tool('clickup_create_task').handler(
-      { list_id: '100', name: 'x', custom_fields: { Client: 'Selectry' } },
+      { list_id: '100', name: 'x', custom_fields: { Client: 'Northwind' } },
       testContext(),
     )
     expect(out.id).toBe('86new')
-    expect(out.custom_fields).toEqual([{ id: 'cf-1', name: 'Client', value: 'Selectry' }])
+    expect(out.custom_fields).toEqual([{ id: 'cf-1', name: 'Client', value: 'Northwind' }])
     expect(out.custom_field_errors).toBeUndefined()
   })
 
   it('BREAK CHECK: keeps the task id and names the failed field when a custom field write fails after creation (Finding 2)', async () => {
     mswServer.use(...fx.listMetaHandlers(), ...fx.createWithFailingFieldHandlers())
     const out = await tool('clickup_create_task').handler(
-      { list_id: '100', name: 'x', custom_fields: { Client: 'Selectry' } },
+      { list_id: '100', name: 'x', custom_fields: { Client: 'Northwind' } },
       testContext(),
     )
     // The unacceptable outcome this guards against: losing the id and
@@ -290,7 +290,7 @@ describe('clickup_create_task', () => {
     mswServer.use(...fx.listMetaHandlers(), ...fx.createSucceedsThenRefetchFailsHandlers())
     await expect(
       tool('clickup_create_task').handler(
-        { list_id: '100', name: 'x', custom_fields: { Client: 'Selectry' } },
+        { list_id: '100', name: 'x', custom_fields: { Client: 'Northwind' } },
         testContext(),
       ),
     ).rejects.toThrow(/succeeded, but reading task 86new back afterward failed.*already happened/)
@@ -436,17 +436,17 @@ describe('clickup_update_task', () => {
   it('returns the re-fetched task with the custom field actually populated, not the pre-write snapshot (Finding 2)', async () => {
     mswServer.use(...fx.listMetaHandlers(), ...fx.updateWithFieldHandlers())
     const out = await tool('clickup_update_task').handler(
-      { task_id: '86abc', custom_fields: { Client: 'Selectry' } },
+      { task_id: '86abc', custom_fields: { Client: 'Northwind' } },
       testContext(),
     )
-    expect(out.custom_fields).toEqual([{ id: 'cf-1', name: 'Client', value: 'Selectry' }])
+    expect(out.custom_fields).toEqual([{ id: 'cf-1', name: 'Client', value: 'Northwind' }])
     expect(out.custom_field_errors).toBeUndefined()
   })
 
   it('BREAK CHECK: keeps the task id and names the failed field when a custom field write fails after updating (Finding 2)', async () => {
     mswServer.use(...fx.listMetaHandlers(), ...fx.updateWithFieldHandlers({ failing: true }))
     const out = await tool('clickup_update_task').handler(
-      { task_id: '86abc', custom_fields: { Client: 'Selectry' } },
+      { task_id: '86abc', custom_fields: { Client: 'Northwind' } },
       testContext(),
     )
     expect(out.id).toBe('86abc')
@@ -458,7 +458,7 @@ describe('clickup_update_task', () => {
     mswServer.use(...fx.listMetaHandlers(), ...fx.updateSucceedsThenRefetchFailsHandlers())
     await expect(
       tool('clickup_update_task').handler(
-        { task_id: '86abc', custom_fields: { Client: 'Selectry' } },
+        { task_id: '86abc', custom_fields: { Client: 'Northwind' } },
         testContext(),
       ),
     ).rejects.toThrow(/succeeded, but reading task 86abc back afterward failed.*already happened/)

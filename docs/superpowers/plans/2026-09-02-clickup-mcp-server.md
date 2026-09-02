@@ -1343,7 +1343,7 @@ describe('clickup_get_list', () => {
   it('exposes dropdown option names so a writer does not have to guess', async () => {
     mswServer.use(...fx.listHandlers())
     const out = await tool('clickup_get_list').handler({ list_id: '100' }, testContext())
-    expect(out.custom_fields[0].options.map((o: { name: string }) => o.name)).toContain('Selectry')
+    expect(out.custom_fields[0].options.map((o: { name: string }) => o.name)).toContain('Northwind')
   })
 })
 
@@ -1565,7 +1565,7 @@ describe('clickup_create_task', () => {
   it('rejects an unknown custom field name naming the available fields', async () => {
     mswServer.use(...fx.listMetaHandlers())
     await expect(tool('clickup_create_task').handler(
-      { list_id: '100', name: 'x', custom_fields: { Kunde: 'Selectry' } }, testContext()))
+      { list_id: '100', name: 'x', custom_fields: { Kunde: 'Northwind' } }, testContext()))
       .rejects.toThrow(/no custom field "Kunde".*Client/)
   })
 
@@ -1573,7 +1573,7 @@ describe('clickup_create_task', () => {
     const seen: string[] = []
     mswServer.use(...fx.listMetaHandlers(), ...fx.createWithFieldHandlers(seen))
     await tool('clickup_create_task').handler(
-      { list_id: '100', name: 'x', custom_fields: { Client: 'Selectry' } }, testContext())
+      { list_id: '100', name: 'x', custom_fields: { Client: 'Northwind' } }, testContext())
     expect(seen).toContain('/v2/task/86new/field/cf-1')
   })
 })

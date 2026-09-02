@@ -115,7 +115,7 @@ describe('clickup_get_list', () => {
   it('exposes dropdown option names so a writer does not have to guess', async () => {
     mswServer.use(...fx.listHandlers())
     const out = await tool('clickup_get_list').handler({ list_id: '100' }, testContext())
-    expect(out.custom_fields[0].options.map((o: { name: string }) => o.name)).toContain('Selectry')
+    expect(out.custom_fields[0].options.map((o: { name: string }) => o.name)).toContain('Northwind')
   })
 
   it('captures a status id only when ClickUp actually reports one', async () => {

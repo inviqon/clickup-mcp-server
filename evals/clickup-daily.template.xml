@@ -1,0 +1,69 @@
+<!--
+  Template for evals/clickup-daily.xml. Copy it, fill every <answer> against
+  YOUR OWN workspace, and keep the result out of git (.gitignore already
+  excludes evals/clickup-daily.xml).
+
+  Replace every ALL_CAPS placeholder with a real value from your workspace.
+  Do not commit the filled file: a real set names real space, folder, list
+  and member identifiers, which are client-confidential.
+
+  Rules the set must keep, enforced by tests/evals.test.ts against this
+  template's structure:
+
+  - Exactly ten qa_pair entries.
+  - Every question has a non-empty answer.
+  - No time-relative wording (today, yesterday, now, currently, running,
+    open task(s), as of, this/last/next week): an answer that depends on
+    when it is asked is not reproducible.
+  - Each pair needs at least two tool calls: one to find where something
+    lives, a second to inspect it.
+
+  And one rule tests cannot check for you, from spec section 12: each
+  question must be INDEPENDENT. Ten questions that all resolve to the same
+  two facts about the same list measure one fact ten times. The ten slots
+  below are deliberately spread across different spaces, folders, lists and
+  members so that a filled set cannot collapse onto a single lookup - keep
+  that spread when you fill them.
+-->
+<evaluation>
+  <qa_pair>
+    <question>How many folders are in the space named SPACE_A, and how many lists sit directly in that space rather than inside a folder?</question>
+    <answer>FOLDER_COUNT, FOLDERLESS_LIST_COUNT</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which folder in the space named SPACE_B contains the most lists, and how many does it contain?</question>
+    <answer>FOLDER_NAME, LIST_COUNT</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many statuses are configured on the list named LIST_A, and what is the name of the one whose type is closed?</question>
+    <answer>STATUS_COUNT, CLOSED_STATUS_NAME</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many custom fields are defined on the list named LIST_B, and what is the name of the first one?</question>
+    <answer>FIELD_COUNT, FIELD_NAME</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What is the id of the space named SPACE_C, and how many folders does it contain?</question>
+    <answer>SPACE_ID, FOLDER_COUNT</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which list in the folder named FOLDER_C has a description, and what does that description say it is for?</question>
+    <answer>LIST_NAME, DESCRIPTION_SUBJECT</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many spaces does the workspace contain, and which of them contains the folder named FOLDER_D?</question>
+    <answer>SPACE_COUNT, SPACE_NAME</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Resolve the workspace member whose name contains MEMBER_QUERY_A. How many candidates come back, and what is the id of the first?</question>
+    <answer>CANDIDATE_COUNT, MEMBER_ID</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Resolve the workspace members whose names contain MEMBER_QUERY_B and MEMBER_QUERY_C. Do they share an email domain, and if so which one?</question>
+    <answer>YES_OR_NO, EMAIL_DOMAIN</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which folder in the space named SPACE_D contains no lists at all, and how many folders in that space do contain at least one?</question>
+    <answer>EMPTY_FOLDER_NAME, NON_EMPTY_FOLDER_COUNT</answer>
+  </qa_pair>
+</evaluation>
