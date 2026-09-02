@@ -74,4 +74,40 @@ describe('TtlCache', () => {
     await expect(p2).resolves.toBe('v2')
     expect(load).toHaveBeenCalledTimes(2)
   })
+
+  // Added per reviewer finding on this task: an orphaned in-flight load
+  // (started before invalidate(), still running after it) must not
+  // overwrite a fresher entry once it finally settles. Load A starts,
+  // invalidate() fires while A is still pending, load B starts for the
+  // same key and settles first (the fresh value), then A settles late
+  // (the stale value). The cache's final state - not either promise's own
+  // resolved value - must reflect B, and a later getOrLoad must not
+  // re-invoke the loader.
+  it('does not let an orphaned in-flight load overwrite a fresher entry after invalidate', async () => {
+    let resolveStale: (value: string) => void = () => {}
+    const staleLoad = new Promise<string>((resolve) => {
+      resolveStale = resolve
+    })
+    let resolveFresh: (value: string) => void = () => {}
+    const freshLoad = new Promise<string>((resolve) => {
+      resolveFresh = resolve
+    })
+
+    const load = vi.fn()
+      .mockImplementationOnce(() => staleLoad)
+      .mockImplementationOnce(() => freshLoad)
+    const cache = new TtlCache({ ttlSeconds: 60 })
+
+    const pStale = cache.getOrLoad('tree:9007', load)
+    cache.invalidate('tree:')
+    const pFresh = cache.getOrLoad('tree:9007', load)
+
+    resolveFresh('fresh')
+    await pFresh
+    resolveStale('stale')
+    await pStale
+
+    expect(await cache.getOrLoad('tree:9007', load)).toBe('fresh')
+    expect(load).toHaveBeenCalledTimes(2)
+  })
 })

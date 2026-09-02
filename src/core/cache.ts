@@ -17,6 +17,17 @@ type CacheEntry = {
  * `inflight`, so the loader runs at most once per key at a time. A rejected
  * load removes its in-flight entry and stores nothing, so a transient
  * failure is never cached and the next call retries.
+ *
+ * `invalidate` can remove a key from `inflight` while its load is still
+ * running (Task 13 calls `invalidate('tree:')` after every structural
+ * write, which can race an already-started read of the same prefix). Such
+ * an orphaned load must not resurrect a stale value once it finally
+ * settles, and must not clobber a newer load that a later caller started
+ * for the same key. Each settlement handler therefore checks, by identity,
+ * that `inflight.get(key)` still points at the promise it was registered
+ * with before writing to `entries` or deleting from `inflight` - if the key
+ * was invalidated or reclaimed by a newer load in the meantime, the settled
+ * promise is a no-op.
  */
 export class TtlCache {
   private readonly ttlMs: number
@@ -41,14 +52,18 @@ export class TtlCache {
       return pending as Promise<T>
     }
 
-    const promise = load().then(
+    const promise: Promise<T> = load().then(
       (value) => {
-        this.entries.set(key, { expiresAt: this.now() + this.ttlMs, value })
-        this.inflight.delete(key)
+        if (this.inflight.get(key) === promise) {
+          this.entries.set(key, { expiresAt: this.now() + this.ttlMs, value })
+          this.inflight.delete(key)
+        }
         return value
       },
       (error: unknown) => {
-        this.inflight.delete(key)
+        if (this.inflight.get(key) === promise) {
+          this.inflight.delete(key)
+        }
         throw error
       },
     )
