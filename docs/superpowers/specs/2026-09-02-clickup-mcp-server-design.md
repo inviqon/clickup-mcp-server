@@ -292,6 +292,7 @@ reported inside the result object with `isError: true`, not as protocol errors.
 | `CLICKUP_RATE_LIMIT` | 100 | Requests per minute, plan dependent |
 | `CLICKUP_MAX_RESPONSE_CHARS` | 40000 | Character budget per response |
 | `CLICKUP_HTTP_PORT` | 3000 | HTTP transport only |
+| `CLICKUP_HTTP_HOST` | 127.0.0.1 | HTTP transport only |
 | `CLICKUP_ALLOWED_ORIGINS` | empty | HTTP transport only |
 | `LOG_LEVEL` | `info` | stderr logging |
 

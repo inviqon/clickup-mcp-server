@@ -60,7 +60,7 @@ Every task's requirements implicitly include this section.
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `type ServerConfig`, `function loadConfig(env: NodeJS.ProcessEnv): ServerConfig`. Fields: `apiKey: string`, `teamId: string`, `mode: 'read' | 'write' | 'admin'`, `enabledCategories: Category[] | null`, `disabledTools: string[]`, `timezone: string`, `cacheTtlSeconds: number`, `rateLimit: number`, `maxResponseChars: number`, `httpPort: number`, `allowedOrigins: string[]`, `logLevel: 'debug' | 'info' | 'warn' | 'error'`.
+- Produces: `type ServerConfig`, `function loadConfig(env: NodeJS.ProcessEnv): ServerConfig`. Fields: `apiKey: string`, `teamId: string`, `mode: 'read' | 'write' | 'admin'`, `enabledCategories: Category[] | null`, `disabledTools: string[]`, `timezone: string`, `cacheTtlSeconds: number`, `rateLimit: number`, `maxResponseChars: number`, `httpPort: number`, `httpHost: string`, `allowedOrigins: string[]`, `logLevel: 'debug' | 'info' | 'warn' | 'error'`.
 
 - [ ] **Step 1: Create the package manifest**
 
@@ -72,8 +72,8 @@ Every task's requirements implicitly include this section.
   "license": "MIT",
   "engines": { "node": ">=24" },
   "bin": {
-    "clickup-mcp": "dist/bin/stdio.js",
-    "clickup-mcp-http": "dist/bin/http.js"
+    "clickup-mcp": "dist/src/bin/stdio.js",
+    "clickup-mcp-http": "dist/src/bin/http.js"
   },
   "scripts": {
     "build": "tsc",
@@ -81,8 +81,8 @@ Every task's requirements implicitly include this section.
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "docs:tools": "node --experimental-strip-types scripts/generate-tool-docs.ts",
-    "inspect": "npx @modelcontextprotocol/inspector node dist/bin/stdio.js"
+    "docs:tools": "npm run build && node dist/scripts/generate-tool-docs.js",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/src/bin/stdio.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -631,9 +631,10 @@ describe('ClickUpClient', () => {
   it('never includes the token in an error message', async () => {
     mswServer.use(http.get('https://api.clickup.com/api/v2/task/1',
       () => HttpResponse.json({ err: 'nope' }, { status: 403 })))
-    await client().request({ method: 'GET', path: '/task/1', schema }).catch((e: Error) => {
-      expect(e.message).not.toContain('pk_123')
-    })
+    const err = await client().request({ method: 'GET', path: '/task/1', schema })
+      .then(() => null, (e: Error) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(JSON.stringify(err, Object.getOwnPropertyNames(err))).not.toContain('pk_123')
   })
 
   it('does not retry a 500 more than maxRetries times', async () => {
@@ -1056,8 +1057,10 @@ without the token ever being used as a map key in cleartext.
 visible when its rank is at most the configured rank), then the category filter,
 then the blocklist.
 
-`RESPONSE_FORMAT_SHAPE` is spread into the input schema of every read tool so
-the parameter is declared identically everywhere.
+`RESPONSE_FORMAT_SHAPE` is NOT spread into individual tool schemas. `buildServer`
+appends it to the advertised input schema of every `read` mode tool and strips
+`response_format` from the arguments before the strict parse of the rest, so no
+tool can forget it and no tool can trip over it.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -1174,7 +1177,8 @@ inputSchema, outputSchema, annotations: annotationsFor(mode) }, wrapper)`.
 
 The wrapper, in order:
 
-1. Parses arguments with `z.strictObject(inputSchema)`. On failure returns
+1. Pulls `response_format` out of the arguments (defaulting to `markdown`) and
+   parses what remains with `z.strictObject(inputSchema)`. On failure returns
    `{ isError: true, content: [{ type: 'text', text: 'Invalid arguments: <issues>' }] }`,
    with each issue naming the offending key. The SDK validates against a
    non-strict object, so this second strict parse is what makes an unknown key
@@ -1414,7 +1418,7 @@ export const getListTool: ToolDefinition<typeof inputShape, typeof outputShape> 
     'Use clickup_get_workspace_tree first if you do not know the list id.',
     'Examples: "what statuses does Sprint 1 use", "which custom fields can I set on this list".',
   ].join(' '),
-  inputSchema: inputShape,   // { list_id: z.string().describe('ClickUp list id, e.g. "901234"'), ...RESPONSE_FORMAT_SHAPE }
+  inputSchema: inputShape,   // { list_id: z.string().describe('ClickUp list id, e.g. "901234"') }
   outputSchema: outputShape, // { id, name, statuses[], custom_fields[] }
   handler: async ({ list_id }, ctx) => loadListMeta(ctx, list_id),
   render: (out) => [
@@ -1432,17 +1436,17 @@ export const getListTool: ToolDefinition<typeof inputShape, typeof outputShape> 
 
 The remaining three:
 
-- `clickup_get_workspace_tree`: input `{ ...RESPONSE_FORMAT_SHAPE }`. Output
+- `clickup_get_workspace_tree`: input `{}`. Output
   `{ team_id, spaces: [{ id, name, folders: [{ id, name, lists: [{ id, name, task_count? }] }], lists: [...] }] }`.
   Loads through `loadWorkspaceTree`, which fans out with `Promise.all` over
   spaces and folders under the rate limiter. Renders as an indented list.
-- `clickup_resolve_member`: input `{ query: z.string().min(1), ...RESPONSE_FORMAT_SHAPE }`.
+- `clickup_resolve_member`: input `{ query: z.string().min(1) }`.
   Output `{ query, ambiguous: boolean, matches: [{ id, username, email }] }`.
   `me` resolves through `GET /v2/user`. Otherwise case insensitive substring
   match on username and email. `ambiguous` is `matches.length > 1`. Never
   truncate to the first match.
 - `clickup_search_tasks`: input
-  `{ query: z.string().min(2), space_id: z.string().optional(), list_id: z.string().optional(), include_closed: z.boolean().default(false), limit: z.number().int().min(1).max(100).default(25), offset: z.number().int().min(0).default(0), ...RESPONSE_FORMAT_SHAPE }`.
+  `{ query: z.string().min(2), space_id: z.string().optional(), list_id: z.string().optional(), include_closed: z.boolean().default(false), limit: z.number().int().min(1).max(100).default(25), offset: z.number().int().min(0).default(0) }`.
   Backed by `GET /v2/team/{teamId}/task`, filtered locally on name and
   description because the endpoint has no text query parameter. Returns a
   `Page<TaskSummary>`.
@@ -1478,7 +1482,7 @@ git commit -m "feat: navigation tools with cached workspace tree and list metada
 
 **Interfaces:**
 - Consumes: `loadListMeta` (Task 10), `resolveDate` and `formatDate` (Task 6), `paginate`, `omitEmpty`, `nameWithId`, `bulletList` (Task 7).
-- Produces: `TASK_TOOLS`, plus `resolveCustomFields(ctx, listId, input: Record<string, string | number | boolean>): Promise<Array<{ id: string; value: unknown }>>`.
+- Produces: `TASK_TOOLS`; `TaskSummarySchema` and `type TaskSummary` exported from `src/clickup/schemas.ts` (consumed by Tasks 12, 14 and 15); plus `resolveCustomFields(ctx, listId, input: Record<string, string | number | boolean>): Promise<Array<{ id: string; value: unknown }>>`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1619,7 +1623,7 @@ Input schemas, verbatim:
 
 ```ts
 // clickup_get_task (read)
-{ task_id: z.string(), include_comments: z.boolean().default(false), ...RESPONSE_FORMAT_SHAPE }
+{ task_id: z.string(), include_comments: z.boolean().default(false) }
 
 // clickup_list_tasks (read)
 {
@@ -1634,7 +1638,6 @@ Input schemas, verbatim:
   include_subtasks: z.boolean().default(false),
   limit: z.number().int().min(1).max(100).default(25),
   offset: z.number().int().min(0).default(0),
-  ...RESPONSE_FORMAT_SHAPE,
 }
 
 // clickup_create_task (write)
@@ -1717,7 +1720,7 @@ Input schemas, verbatim:
 ```ts
 // clickup_get_comments (read)
 { task_id: z.string(), limit: z.number().int().min(1).max(100).default(25),
-  offset: z.number().int().min(0).default(0), ...RESPONSE_FORMAT_SHAPE }
+  offset: z.number().int().min(0).default(0) }
 
 // clickup_create_comment (write)
 { task_id: z.string(), text: z.string().min(1),
@@ -1727,7 +1730,7 @@ Input schemas, verbatim:
 { comment_id: z.string(), text: z.string().min(1), resolved: z.boolean().optional() }
 
 // clickup_list_space_tags (read)
-{ space_id: z.string(), ...RESPONSE_FORMAT_SHAPE }
+{ space_id: z.string() }
 
 // clickup_set_task_tags (write)
 { task_id: z.string(), tags: z.array(z.string()) }
@@ -1778,7 +1781,9 @@ Endpoints: `GET|POST /v2/task/{id}/comment`, `PUT /v2/comment/{id}`,
 `GET /v2/space/{id}/tag`, `POST|DELETE /v2/task/{id}/tag/{tag_name}`.
 `clickup_set_task_tags` reads the task's current tags, diffs against the
 requested set, and validates every requested tag against the space tag list
-before issuing any write.
+before issuing any write. The task's space is resolved through
+`loadWorkspaceTree` (task -> list -> folder -> space), which is already cached;
+no new endpoint is introduced for it.
 
 - [ ] **Step 3: Commit**
 
@@ -1890,13 +1895,13 @@ Input schemas, verbatim:
   billable: z.boolean().optional(), tags: z.array(z.string()).optional() }
 
 // clickup_stop_timer (write)     { description: z.string().optional(), tags: z.array(z.string()).optional() }
-// clickup_get_current_timer (read){ ...RESPONSE_FORMAT_SHAPE }
+// clickup_get_current_timer (read){}
 
 // clickup_list_time_entries (read)
 { start_date: z.string().optional(), end_date: z.string().optional(),
   assignee: z.string().optional(), task_id: z.string().optional(),
   limit: z.number().int().min(1).max(100).default(25),
-  offset: z.number().int().min(0).default(0), ...RESPONSE_FORMAT_SHAPE }
+  offset: z.number().int().min(0).default(0) }
 
 // clickup_create_time_entry (write)
 { task_id: z.string().optional(), start: z.string(), duration: z.string(),
@@ -2000,7 +2005,7 @@ git commit -m "feat: time tracking tools with running timer guard and human dura
 - Consumes: `getRunningEntry` and the time entry endpoint (Task 14), the task listing endpoint (Task 11), `resolveDate` (Task 6).
 - Produces: `MYDAY_TOOLS` with the single tool `clickup_get_my_day`.
 
-Input schema: `{ date: z.string().optional(), ...RESPONSE_FORMAT_SHAPE }`, where
+Input schema: `{ date: z.string().optional() }`, where
 `date` defaults to today in the configured timezone.
 
 Output schema:
@@ -2093,10 +2098,10 @@ Input schemas, verbatim:
 ```ts
 // clickup_search_docs (read)
 { query: z.string().min(2), limit: z.number().int().min(1).max(50).default(10),
-  offset: z.number().int().min(0).default(0), ...RESPONSE_FORMAT_SHAPE }
+  offset: z.number().int().min(0).default(0) }
 
 // clickup_read_doc (read)
-{ doc_id: z.string(), page_id: z.string().optional(), ...RESPONSE_FORMAT_SHAPE }
+{ doc_id: z.string(), page_id: z.string().optional() }
 ```
 
 - [ ] **Step 1: Write the failing tests**
@@ -2212,7 +2217,7 @@ describe('http transport', () => {
   })
 
   it('rejects a request with no Authorization header when no env token is set', async () => {
-    const s = createHttpServer(loadConfig({ CLICKUP_TEAM_ID: '9007', CLICKUP_ALLOW_HEADER_AUTH: 'true' }))
+    const s = createHttpServer(loadConfig({ CLICKUP_TEAM_ID: '9007', CLICKUP_API_KEY: '' }))
     // expects 401 with a body naming the Authorization header
   })
 
@@ -2251,8 +2256,10 @@ Implementation notes:
   `CLICKUP_API_KEY`. Team id comes from `X-ClickUp-Team-Id` or `CLICKUP_TEAM_ID`.
 - `TenantStore` keys one cache and one limiter per `credentialKey`, so tenants
   never share cached workspace data and never share a rate budget.
-- Bind address defaults to `127.0.0.1`. Binding elsewhere requires an explicit
-  `CLICKUP_HTTP_HOST`, and the startup log names the address on stderr.
+- Bind address comes from `CLICKUP_HTTP_HOST`, default `127.0.0.1`. Binding
+  elsewhere is explicit, and the startup log names the address on stderr.
+- Auth resolution has no feature flag: header if present, else `CLICKUP_API_KEY`,
+  else 401 naming the `Authorization` header.
 
 - [ ] **Step 3: Commit**
 
@@ -2303,7 +2310,7 @@ describe('tool documentation', () => {
     for (const v of ['CLICKUP_API_KEY', 'CLICKUP_TEAM_ID', 'CLICKUP_MCP_MODE',
       'CLICKUP_ENABLED_CATEGORIES', 'CLICKUP_DISABLED_TOOLS', 'CLICKUP_TIMEZONE',
       'CLICKUP_CACHE_TTL_SECONDS', 'CLICKUP_RATE_LIMIT', 'CLICKUP_MAX_RESPONSE_CHARS',
-      'CLICKUP_HTTP_PORT', 'CLICKUP_ALLOWED_ORIGINS', 'LOG_LEVEL']) {
+      'CLICKUP_HTTP_PORT', 'CLICKUP_HTTP_HOST', 'CLICKUP_ALLOWED_ORIGINS', 'LOG_LEVEL']) {
       expect(readme).toContain(v)
     }
   })
