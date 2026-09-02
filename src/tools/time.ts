@@ -98,6 +98,49 @@ function resolveEntriesRange(
   return { startMs, endMs, range }
 }
 
+/**
+ * `all_members` and `assignees` both scope the same underlying query in
+ * incompatible ways - "everyone" vs "these specific people" - so supplying
+ * both is exactly the kind of ambiguity reliability rule 4 says must be
+ * rejected up front rather than silently resolved by picking one. Mirrors
+ * `assertAtMostOneLocationFilter` above and the exactly-one guards in
+ * src/tools/tasks.ts and src/tools/structure.ts. Shared by
+ * `clickup_list_time_entries` and `clickup_time_report`, the two tools that
+ * both take these two parameters.
+ */
+function assertNotBothAllMembersAndAssignees(args: {
+  all_members?: boolean | undefined
+  assignees?: string[] | undefined
+}): void {
+  if (args.all_members === true && args.assignees !== undefined) {
+    throw new ClickUpUsageError(
+      `all_members and assignees are mutually exclusive - all_members asks for every member's entries, ` +
+        `assignees asks for specific ones. Got all_members: true and assignees ${JSON.stringify(args.assignees)}. ` +
+        'Drop whichever one you did not mean.',
+    )
+  }
+}
+
+/**
+ * States which assignee scope produced a result - the caller's own entries
+ * (ClickUp's own default when neither all_members nor assignees is given,
+ * per `GET /team/{team_id}/time_entries`'s documented behavior), every
+ * member (all_members), or specific requested id(s) (assignees) - so a
+ * caller can tell "just me" from "the whole team" by reading the result
+ * alone, the same way `range` already states the date window used without
+ * the caller having to re-derive it from what they sent. Shared by
+ * `clickup_list_time_entries` and `clickup_time_report`.
+ */
+function describeAssigneeScope(args: { all_members?: boolean | undefined; assignees?: string[] | undefined }): string {
+  if (args.all_members === true) {
+    return 'every member (all_members: true)'
+  }
+  if (args.assignees !== undefined && args.assignees.length > 0) {
+    return `member(s) ${args.assignees.join(', ')}`
+  }
+  return "your own entries only - ClickUp's default when neither all_members nor assignees is given"
+}
+
 function tagsBody(tags: string[] | undefined): { tags: Array<{ name: string }>; tag_action: 'replace' } | undefined {
   if (tags === undefined) {
     return undefined
@@ -291,7 +334,16 @@ const listTimeEntriesInputShape = {
     .array(z.string())
     .optional()
     .describe(
-      'User ids; defaults to every entry visible to this token. Sent to ClickUp as one comma separated list.',
+      'User ids to restrict to. Without this or all_members, ClickUp returns only entries belonging to the ' +
+        "authenticated token's own user - never every entry visible to it. Sent to ClickUp as one comma " +
+        'separated list. Mutually exclusive with all_members.',
+    ),
+  all_members: z
+    .boolean()
+    .optional()
+    .describe(
+      "Return every member's entries (ClickUp's own assignee=any) instead of just the caller's own, which is " +
+        'the default when neither this nor assignees is given. Mutually exclusive with assignees.',
     ),
   task_id: z.string().optional().describe('Restrict to entries logged against one task'),
   space_id: z
@@ -313,6 +365,7 @@ const listTimeEntriesInputShape = {
 
 const listTimeEntriesOutputShape = {
   range: z.string(),
+  scope: z.string(),
   total: z.number(),
   count: z.number(),
   offset: z.number(),
@@ -330,25 +383,34 @@ export const listTimeEntriesTool: ToolDefinition<typeof listTimeEntriesInputShap
   description: [
     'List time entries in a date range, defaulting to the last 7 days when neither start_date nor',
     'end_date is given - the output always states which range it actually used, so a caller never',
-    'has to guess. Totals the duration of the entries shown (not the whole underlying range if it is',
-    'paginated), rendered in "1h 30m" form. Each entry carries who logged it, and its list/space when',
-    'ClickUp reports one. Scope with at most one of space_id/folder_id/list_id/task_id - ClickUp',
-    'accepts only one at a time.',
-    'Examples: "how much time did I log this week", "show time entries on task 86abc since Monday".',
+    'has to guess. Without all_members or assignees, ClickUp returns only the entries belonging to',
+    'the authenticated token\'s own user - never every entry visible to it. Pass all_members for',
+    'every member\'s entries, or assignees for specific ones; the two are mutually exclusive, and the',
+    'output states which of the three scopes this call actually used, so "just me" and "the whole',
+    'team" are never something a caller has to infer from what they sent. Totals the duration of the',
+    'entries shown (not the whole underlying range if it is paginated), rendered in "1h 30m" form.',
+    'Each entry carries who logged it, and its list/space when ClickUp reports one. Scope the',
+    'location with at most one of space_id/folder_id/list_id/task_id - ClickUp accepts only one at a',
+    'time.',
+    'Examples: "how much time did I log this week", "how much did the whole team log this week",',
+    '"show time entries on task 86abc since Monday".',
   ].join(' '),
   inputSchema: listTimeEntriesInputShape,
   outputSchema: listTimeEntriesOutputShape,
   handler: async (args, ctx) => {
     assertAtMostOneLocationFilter(args)
+    assertNotBothAllMembersAndAssignees(args)
     const limit = args.limit ?? 25
     const offset = args.offset ?? 0
     const { startMs, endMs, range: resolvedRange } = resolveEntriesRange(args, ctx)
     const assigneeIds = args.assignees !== undefined ? args.assignees.map(toAssigneeId) : undefined
+    const scope = describeAssigneeScope(args)
 
     const entries = await listTimeEntriesRaw(ctx, {
       startMs,
       endMs,
       assigneeIds,
+      allMembers: args.all_members,
       taskId: args.task_id,
       spaceId: args.space_id,
       folderId: args.folder_id,
@@ -365,14 +427,15 @@ export const listTimeEntriesTool: ToolDefinition<typeof listTimeEntriesInputShap
       .slice(offset, offset + limit)
       .reduce((sum, e) => sum + Math.abs(Number(e.duration)), 0)
 
-    return { range: resolvedRange, ...page, total_duration: formatDurationHm(totalMs) }
+    return { range: resolvedRange, scope, ...page, total_duration: formatDurationHm(totalMs) }
   },
   render: (out) => {
     if (out.items.length === 0) {
-      return `No time entries found for ${out.range}.`
+      return `No time entries found for ${out.range} (scope: ${out.scope}).`
     }
     return [
       `# Time entries for ${out.range}`,
+      `Scope: ${out.scope}`,
       '',
       `Showing ${out.count} of ${out.total}${out.has_more ? ' (more available, pass a higher offset)' : ''}`,
       `Total: ${out.total_duration}`,
@@ -528,8 +591,17 @@ const timeReportInputShape = {
     .array(z.string())
     .optional()
     .describe(
-      'User ids to report on; defaults to every entry visible to this token. A member in this list ' +
-        'with no visible entries is reported explicitly rather than as 0h - see the tool description.',
+      'User ids to report on. Without this or all_members, ClickUp returns only entries belonging to the ' +
+        "authenticated token's own user - never every entry visible to it. A member in this list with no " +
+        'visible entries is reported explicitly rather than as 0h - see the tool description. Mutually ' +
+        'exclusive with all_members.',
+    ),
+  all_members: z
+    .boolean()
+    .optional()
+    .describe(
+      "Report on every member's entries (ClickUp's own assignee=any) instead of just the caller's own, which " +
+        'is the default when neither this nor assignees is given. Mutually exclusive with assignees.',
     ),
   space_id: z
     .string()
@@ -596,6 +668,7 @@ const timeReportOverallOutputShape = {
 
 const timeReportOutputShape = {
   range: z.string(),
+  scope: z.string(),
   group_by: z.enum(['member', 'list', 'space']),
   groups: z.array(z.object(timeReportGroupOutputShape)),
   overall: z.object(timeReportOverallOutputShape),
@@ -680,6 +753,20 @@ const NO_VISIBILITY_EXPLANATION =
   'This can mean nothing was tracked for them in this range, or this token cannot read their entries - ' +
   'it is not established whether a personal API token may read another member\'s time entries.'
 
+/**
+ * The all_members counterpart to `NO_VISIBILITY_EXPLANATION` above, used
+ * only when the whole report comes back empty under `all_members: true`.
+ * Unlike a named member's own row, there is no per-person visibility check
+ * to run here - "nobody logged anything" and "this token cannot use
+ * assignee=any for the whole team and ClickUp silently narrowed it to the
+ * caller's own (also empty) entries" produce an identical empty result, and
+ * which one actually happened is not established from this response alone.
+ */
+const ALL_MEMBERS_NO_VISIBILITY_EXPLANATION =
+  'This can mean nobody tracked anything in this range, or this token lacks permission to see every ' +
+  "member's entries and ClickUp silently narrowed assignee=any to this token's own (also empty) entries - " +
+  'it is not established which.'
+
 export const timeReportTool: ToolDefinition<typeof timeReportInputShape, typeof timeReportOutputShape> = {
   name: 'clickup_time_report',
   title: 'ClickUp Time Report',
@@ -689,20 +776,25 @@ export const timeReportTool: ToolDefinition<typeof timeReportInputShape, typeof 
     'One call for totals grouped by member (default), list or space over a date range - the report',
     'this server exists to answer "who logged how much time, and how much of it was billable" without',
     'walking clickup_list_time_entries by hand. Defaults to the last 7 days exactly as',
-    'clickup_list_time_entries does, and always states the range used. Reports HOURS LOGGED only -',
-    'ClickUp has no public endpoint for the capacity behind its Workload view, so no utilization',
-    'percentage is computed unless you supply weekly_capacity_hours yourself, pro-rated across the',
-    'requested range; without it, the field is simply absent, never zero or invented. A member named',
-    'in assignees who comes back with no visible entries is reported as an explicit ambiguity (nothing',
-    'tracked, or this token lacks permission to see them), never as a bare "0h" - a member you did not',
-    'ask about simply does not appear. Rendered as one compact table, not one line per entry.',
-    'Examples: "how much time did the team log this month, by person", "billable hours per list last',
-    'week", "did Arian log any time in the last 30 days".',
+    'clickup_list_time_entries does, and always states the range used. Without all_members or',
+    'assignees, ClickUp returns only the caller\'s own entries - never every entry visible to the',
+    'token - so pass all_members for the whole team\'s totals, or assignees for specific members; the',
+    'two are mutually exclusive, and the output states which scope actually produced the report.',
+    'Reports HOURS LOGGED only - ClickUp has no public endpoint for the capacity behind its Workload',
+    'view, so no utilization percentage is computed unless you supply weekly_capacity_hours yourself,',
+    'pro-rated across the requested range; without it, the field is simply absent, never zero or',
+    'invented. A member named in assignees who comes back with no visible entries is reported as an',
+    'explicit ambiguity (nothing tracked, or this token lacks permission to see them), never as a bare',
+    '"0h" - a member you did not ask about simply does not appear. Rendered as one compact table, not',
+    'one line per entry.',
+    'Examples: "how much time did the whole team log this month, by person" (use all_members),',
+    '"billable hours per list last week", "did Arian log any time in the last 30 days".',
   ].join(' '),
   inputSchema: timeReportInputShape,
   outputSchema: timeReportOutputShape,
   handler: async (args, ctx) => {
     assertAtMostOneLocationFilter({ space_id: args.space_id, folder_id: args.folder_id, list_id: args.list_id })
+    assertNotBothAllMembersAndAssignees(args)
     const groupBy = args.group_by ?? 'member'
     if (args.weekly_capacity_hours !== undefined && groupBy !== 'member') {
       throw new ClickUpUsageError(
@@ -714,11 +806,13 @@ export const timeReportTool: ToolDefinition<typeof timeReportInputShape, typeof 
     const { startMs, endMs, range } = resolveEntriesRange(args, ctx)
     const rangeMs = endMs - startMs
     const requestedAssigneeIds = args.assignees !== undefined ? args.assignees.map(toAssigneeId) : undefined
+    const scope = describeAssigneeScope(args)
 
     const entries = await listTimeEntriesRaw(ctx, {
       startMs,
       endMs,
       assigneeIds: requestedAssigneeIds,
+      allMembers: args.all_members,
       spaceId: args.space_id,
       folderId: args.folder_id,
       listId: args.list_id,
@@ -780,7 +874,10 @@ export const timeReportTool: ToolDefinition<typeof timeReportInputShape, typeof 
             note:
               ambiguousRequestedIds.length > 0
                 ? `No time entries were visible for the requested member(s) in ${range}. ${NO_VISIBILITY_EXPLANATION}`
-                : `No time entries found for ${range}${describeScope(args)}.`,
+                : args.all_members === true
+                  ? `No time entries were visible for any member in ${range}${describeScope(args)}. ` +
+                    ALL_MEMBERS_NO_VISIBILITY_EXPLANATION
+                  : `No time entries found for ${range}${describeScope(args)}.`,
           }
         : (() => {
             const overallTotalMs = entries.reduce((sum, e) => sum + Math.abs(Number(e.duration)), 0)
@@ -804,6 +901,7 @@ export const timeReportTool: ToolDefinition<typeof timeReportInputShape, typeof 
 
     return {
       range,
+      scope,
       group_by: groupBy,
       groups,
       overall,

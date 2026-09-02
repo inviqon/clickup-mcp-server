@@ -342,7 +342,11 @@ function reportEntry(opts: {
  * were asked for - so a request for a user id with no entries in this set
  * (e.g. a third, uninvolved id) genuinely comes back empty rather than the
  * mock silently ignoring the filter, which is what the ambiguity test
- * needs to be a real test rather than a tautology.
+ * needs to be a real test rather than a tautology. `assignee=any` (the
+ * sentinel `all_members` sends) is honoured the same way ClickUp's own API
+ * treats it - every entry, not filtered down to anyone in particular -
+ * rather than being matched literally against a user id and coming back
+ * empty.
  */
 export function reportTimeEntriesHandlers(opts: { seen?: URLSearchParams[]; empty?: boolean } = {}) {
   const all = opts.empty ? [] : [
@@ -386,7 +390,9 @@ export function reportTimeEntriesHandlers(opts: { seen?: URLSearchParams[]; empt
       opts.seen?.push(params)
       const assignee = params.get('assignee')
       const entries =
-        assignee === null ? all : all.filter((e) => assignee.split(',').includes(String(e.user.id)))
+        assignee === null || assignee === 'any'
+          ? all
+          : all.filter((e) => assignee.split(',').includes(String(e.user.id)))
       return HttpResponse.json({ data: entries })
     }),
   ]

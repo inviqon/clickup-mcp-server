@@ -58,9 +58,22 @@ export type ListTimeEntriesFilter = {
    * elsewhere (`getWorkspaceTasks`, src/clickup/endpoints/workspace.ts).
    * Joined into that one string here, not left to `ClickUpClient`'s own
    * array handling, which would produce the wrong wire format for this
-   * endpoint specifically.
+   * endpoint specifically. Ignored when `allMembers` is set - the two are
+   * mutually exclusive at the tool layer (src/tools/time.ts), and this
+   * function trusts that has already been enforced.
    */
   assigneeIds?: number[] | undefined
+  /**
+   * Sends `assignee=any`, ClickUp's own documented sentinel for "every
+   * member", instead of the caller's own entries alone - the default this
+   * endpoint applies when `assignee` is omitted entirely. This is passed
+   * as its own flag, never as a value inside `assigneeIds`: `assigneeIds`
+   * goes through `toAssigneeId` (src/tools/tasks.ts), whose numeric guard
+   * exists to catch a mistyped id before it silently serialises to `null`
+   * on a task-assignment write - a guard that has no reason to reject a
+   * word ClickUp itself defines as meaningful on a read-only query.
+   */
+  allMembers?: boolean | undefined
   isBillable?: boolean | undefined
   spaceId?: string | undefined
   folderId?: string | undefined
@@ -91,7 +104,12 @@ export async function listTimeEntriesRaw(ctx: ClickUpContext, filter: ListTimeEn
     query: {
       start_date: filter.startMs,
       end_date: filter.endMs,
-      assignee: filter.assigneeIds !== undefined && filter.assigneeIds.length > 0 ? filter.assigneeIds.join(',') : undefined,
+      assignee:
+        filter.allMembers === true
+          ? 'any'
+          : filter.assigneeIds !== undefined && filter.assigneeIds.length > 0
+            ? filter.assigneeIds.join(',')
+            : undefined,
       is_billable: filter.isBillable,
       space_id: filter.spaceId,
       folder_id: filter.folderId,

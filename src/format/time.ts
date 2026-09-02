@@ -109,6 +109,7 @@ export type TimeReportGroupLike = {
 
 export type TimeReportLike = {
   range: string
+  scope: string
   group_by: 'member' | 'list' | 'space'
   groups: TimeReportGroupLike[]
   overall: {
@@ -137,7 +138,7 @@ const GROUP_LABEL_HEADING: Record<TimeReportLike['group_by'], string> = {
  * empty result must be explicit) says not to leave to the reader to notice.
  */
 export function renderTimeReport(out: TimeReportLike): string {
-  const heading = `# Time report for ${out.range}`
+  const heading = [`# Time report for ${out.range}`, `Scope: ${out.scope}`].join('\n')
 
   if (out.groups.length === 0) {
     return [heading, '', out.overall.note ?? 'No time entries found.'].join('\n')

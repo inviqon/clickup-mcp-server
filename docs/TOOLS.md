@@ -970,7 +970,7 @@ No input parameters.
 
 **Annotations**: readOnlyHint=true, destructiveHint=false, idempotentHint=true, openWorldHint=true
 
-List time entries in a date range, defaulting to the last 7 days when neither start_date nor end_date is given - the output always states which range it actually used, so a caller never has to guess. Totals the duration of the entries shown (not the whole underlying range if it is paginated), rendered in "1h 30m" form. Each entry carries who logged it, and its list/space when ClickUp reports one. Scope with at most one of space_id/folder_id/list_id/task_id - ClickUp accepts only one at a time. Examples: "how much time did I log this week", "show time entries on task 86abc since Monday".
+List time entries in a date range, defaulting to the last 7 days when neither start_date nor end_date is given - the output always states which range it actually used, so a caller never has to guess. Without all_members or assignees, ClickUp returns only the entries belonging to the authenticated token's own user - never every entry visible to it. Pass all_members for every member's entries, or assignees for specific ones; the two are mutually exclusive, and the output states which of the three scopes this call actually used, so "just me" and "the whole team" are never something a caller has to infer from what they sent. Totals the duration of the entries shown (not the whole underlying range if it is paginated), rendered in "1h 30m" form. Each entry carries who logged it, and its list/space when ClickUp reports one. Scope the location with at most one of space_id/folder_id/list_id/task_id - ClickUp accepts only one at a time. Examples: "how much time did I log this week", "how much did the whole team log this week", "show time entries on task 86abc since Monday".
 
 **Input parameters**
 
@@ -978,7 +978,8 @@ List time entries in a date range, defaulting to the last 7 days when neither st
 |---|---|---|---|---|
 | `start_date` | string | no |  | Defaults to 7 days ago when omitted |
 | `end_date` | string | no |  | Defaults to now when omitted |
-| `assignees` | array of string | no |  | User ids; defaults to every entry visible to this token. Sent to ClickUp as one comma separated list. |
+| `assignees` | array of string | no |  | User ids to restrict to. Without this or all_members, ClickUp returns only entries belonging to the authenticated token's own user - never every entry visible to it. Sent to ClickUp as one comma separated list. Mutually exclusive with all_members. |
+| `all_members` | boolean | no |  | Return every member's entries (ClickUp's own assignee=any) instead of just the caller's own, which is the default when neither this nor assignees is given. Mutually exclusive with assignees. |
 | `task_id` | string | no |  | Restrict to entries logged against one task |
 | `space_id` | string | no |  | Restrict to entries under one space. At most one of space_id/folder_id/list_id/task_id may be given. |
 | `folder_id` | string | no |  | Restrict to entries under one folder. At most one of space_id/folder_id/list_id/task_id may be given. |
@@ -990,6 +991,7 @@ List time entries in a date range, defaulting to the last 7 days when neither st
 **Output fields**
 
 - `range`: string
+- `scope`: string
 - `total`: number
 - `count`: number
 - `offset`: number
@@ -1103,7 +1105,7 @@ Permanently delete a time entry. This cannot be undone through this server. Only
 
 **Annotations**: readOnlyHint=true, destructiveHint=false, idempotentHint=true, openWorldHint=true
 
-One call for totals grouped by member (default), list or space over a date range - the report this server exists to answer "who logged how much time, and how much of it was billable" without walking clickup_list_time_entries by hand. Defaults to the last 7 days exactly as clickup_list_time_entries does, and always states the range used. Reports HOURS LOGGED only - ClickUp has no public endpoint for the capacity behind its Workload view, so no utilization percentage is computed unless you supply weekly_capacity_hours yourself, pro-rated across the requested range; without it, the field is simply absent, never zero or invented. A member named in assignees who comes back with no visible entries is reported as an explicit ambiguity (nothing tracked, or this token lacks permission to see them), never as a bare "0h" - a member you did not ask about simply does not appear. Rendered as one compact table, not one line per entry. Examples: "how much time did the team log this month, by person", "billable hours per list last week", "did Arian log any time in the last 30 days".
+One call for totals grouped by member (default), list or space over a date range - the report this server exists to answer "who logged how much time, and how much of it was billable" without walking clickup_list_time_entries by hand. Defaults to the last 7 days exactly as clickup_list_time_entries does, and always states the range used. Without all_members or assignees, ClickUp returns only the caller's own entries - never every entry visible to the token - so pass all_members for the whole team's totals, or assignees for specific members; the two are mutually exclusive, and the output states which scope actually produced the report. Reports HOURS LOGGED only - ClickUp has no public endpoint for the capacity behind its Workload view, so no utilization percentage is computed unless you supply weekly_capacity_hours yourself, pro-rated across the requested range; without it, the field is simply absent, never zero or invented. A member named in assignees who comes back with no visible entries is reported as an explicit ambiguity (nothing tracked, or this token lacks permission to see them), never as a bare "0h" - a member you did not ask about simply does not appear. Rendered as one compact table, not one line per entry. Examples: "how much time did the whole team log this month, by person" (use all_members), "billable hours per list last week", "did Arian log any time in the last 30 days".
 
 **Input parameters**
 
@@ -1111,7 +1113,8 @@ One call for totals grouped by member (default), list or space over a date range
 |---|---|---|---|---|
 | `start_date` | string | no |  | Defaults to 7 days ago when omitted |
 | `end_date` | string | no |  | Defaults to now when omitted |
-| `assignees` | array of string | no |  | User ids to report on; defaults to every entry visible to this token. A member in this list with no visible entries is reported explicitly rather than as 0h - see the tool description. |
+| `assignees` | array of string | no |  | User ids to report on. Without this or all_members, ClickUp returns only entries belonging to the authenticated token's own user - never every entry visible to it. A member in this list with no visible entries is reported explicitly rather than as 0h - see the tool description. Mutually exclusive with all_members. |
+| `all_members` | boolean | no |  | Report on every member's entries (ClickUp's own assignee=any) instead of just the caller's own, which is the default when neither this nor assignees is given. Mutually exclusive with assignees. |
 | `space_id` | string | no |  | Restrict to entries under one space. At most one of space_id/folder_id/list_id may be given. |
 | `folder_id` | string | no |  | Restrict to entries under one folder. At most one of space_id/folder_id/list_id may be given. |
 | `list_id` | string | no |  | Restrict to entries under one list. At most one of space_id/folder_id/list_id may be given. |
@@ -1121,6 +1124,7 @@ One call for totals grouped by member (default), list or space over a date range
 **Output fields**
 
 - `range`: string
+- `scope`: string
 - `group_by`: enum: member | list | space
 - `groups`: array of object {key, label, entry_count, total_duration, billable_duration, billable_share, utilization, note}
 - `overall`: object {entry_count, total_duration, billable_duration, billable_share, note}

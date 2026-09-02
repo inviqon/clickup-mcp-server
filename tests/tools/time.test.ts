@@ -284,6 +284,47 @@ describe('clickup_list_time_entries', () => {
     ).rejects.toThrow(/not a valid ClickUp user id/)
   })
 
+  it('sends all_members as assignee=any, not as a value passed through the numeric guard', async () => {
+    const seen: URLSearchParams[] = []
+    mswServer.use(...fx.listTimeEntriesHandlers({ seen }))
+    await tool('clickup_list_time_entries').handler({ all_members: true }, testContext())
+    expect(seen[0]!.get('assignee')).toBe('any')
+  })
+
+  it('rejects all_members together with assignees, naming both', async () => {
+    mswServer.use(...fx.listTimeEntriesHandlers())
+    await expect(
+      tool('clickup_list_time_entries').handler({ all_members: true, assignees: ['42'] }, testContext()),
+    ).rejects.toThrow(/all_members.*assignees/s)
+  })
+
+  it('states the caller-only default scope when neither all_members nor assignees is given', async () => {
+    mswServer.use(...fx.listTimeEntriesHandlers())
+    const out = await tool('clickup_list_time_entries').handler({}, testContext())
+    expect(out.scope).toMatch(/own entries/i)
+  })
+
+  it('states the all_members scope', async () => {
+    mswServer.use(...fx.listTimeEntriesHandlers())
+    const out = await tool('clickup_list_time_entries').handler({ all_members: true }, testContext())
+    expect(out.scope).toMatch(/every member/i)
+  })
+
+  it('states the requested assignee ids in scope', async () => {
+    mswServer.use(...fx.listTimeEntriesHandlers())
+    const out = await tool('clickup_list_time_entries').handler({ assignees: ['42', '7'] }, testContext())
+    expect(out.scope).toContain('42')
+    expect(out.scope).toContain('7')
+  })
+
+  it('renders the scope alongside the range so "just me" vs "the whole team" is visible in the result', async () => {
+    mswServer.use(...fx.listTimeEntriesHandlers())
+    const out = await tool('clickup_list_time_entries').handler({ all_members: true }, testContext())
+    const md = tool('clickup_list_time_entries').render(out, testContext())
+    expect(md).toContain('Scope:')
+    expect(md).toMatch(/every member/i)
+  })
+
   it('sends is_billable and the space/folder/list scoping filters', async () => {
     const seen: URLSearchParams[] = []
     mswServer.use(...fx.listTimeEntriesHandlers({ seen }))
@@ -508,6 +549,64 @@ describe('clickup_time_report', () => {
     mswServer.use(...fx.reportTimeEntriesHandlers({ seen }))
     await tool('clickup_time_report').handler({ assignees: ['152549938', '105642832'] }, testContext())
     expect(seen[0]!.get('assignee')).toBe('152549938,105642832')
+  })
+
+  it('rejects a non-numeric assignee id rather than silently sending NaN', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    await expect(
+      tool('clickup_time_report').handler({ assignees: ['not-a-number'] }, testContext()),
+    ).rejects.toThrow(/not a valid ClickUp user id/)
+  })
+
+  it('sends all_members as assignee=any', async () => {
+    const seen: URLSearchParams[] = []
+    mswServer.use(...fx.reportTimeEntriesHandlers({ seen }))
+    await tool('clickup_time_report').handler({ all_members: true }, testContext())
+    expect(seen[0]!.get('assignee')).toBe('any')
+  })
+
+  it('rejects all_members together with assignees, naming both', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    await expect(
+      tool('clickup_time_report').handler({ all_members: true, assignees: ['152549938'] }, testContext()),
+    ).rejects.toThrow(/all_members.*assignees/s)
+  })
+
+  it('totals across every member when all_members is given', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({ all_members: true }, testContext())
+    expect(out.overall).toMatchObject({ entry_count: 3, total_duration: '4h 30m' })
+  })
+
+  it('states the caller-only default scope when neither all_members nor assignees is given', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({}, testContext())
+    expect(out.scope).toMatch(/own entries/i)
+  })
+
+  it('states the all_members scope', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({ all_members: true }, testContext())
+    expect(out.scope).toMatch(/every member/i)
+  })
+
+  it('states the requested assignee ids in scope', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({ assignees: ['152549938'] }, testContext())
+    expect(out.scope).toContain('152549938')
+  })
+
+  it('renders the scope alongside the range', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({ all_members: true }, testContext())
+    const md = tool('clickup_time_report').render(out, testContext())
+    expect(md).toContain('Scope:')
+  })
+
+  it('explains a fully empty result under all_members as a possible visibility ambiguity, not a bare "nothing found"', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers({ empty: true }))
+    const out = await tool('clickup_time_report').handler({ all_members: true }, testContext())
+    expect(out.overall.note).toMatch(/permission|not established/i)
   })
 
   it('renders a compact table, not one line per entry', async () => {
