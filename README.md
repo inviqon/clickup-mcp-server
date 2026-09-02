@@ -64,7 +64,7 @@ copy-pasteable template.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CLICKUP_API_KEY` | required (stdio); may be empty (HTTP) | ClickUp personal API token (`pk_...`). The stdio transport refuses to start without one. The HTTP transport allows an empty value here because it resolves the token per request from the `Authorization` header instead - see [HTTP transport](#http-transport-streamable-http) below. |
+| `CLICKUP_API_KEY` | required (stdio); may be empty (HTTP) | ClickUp personal API token (`pk_...`). The stdio transport refuses to start without one, and additionally probes `GET /v2/user` at startup so a token ClickUp rejects fails immediately, naming this variable, rather than surfacing as an opaque 401 on whichever tool is called first. The HTTP transport allows an empty value here because it resolves the token per request from the `Authorization` header instead - see [HTTP transport](#http-transport-streamable-http) below. |
 | `CLICKUP_TEAM_ID` | required | ClickUp workspace (team) id. The HTTP transport lets a request override this per call via an `X-ClickUp-Team-Id` header. |
 | `CLICKUP_MCP_MODE` | `write` | `read`, `write` or `admin`. Controls which tools this server instance advertises: `write` exposes read and write tools but never admin (destructive) ones; `admin` exposes everything. See [Tool reference](#tool-reference). |
 | `CLICKUP_ENABLED_CATEGORIES` | all categories | Comma separated category filter. Valid values: `navigation`, `tasks`, `comments`, `structure`, `tags`, `time`, `docs`, `daily`. Leave unset to enable every category. |
@@ -130,6 +130,14 @@ CLICKUP_TEAM_ID=9007123456 clickup-mcp-http
 `CLICKUP_API_KEY` may be left empty here - see the security note below - and
 every request must then supply its own credentials as headers against the
 single route, `POST /mcp`:
+
+There is deliberately **no startup token probe on this transport**, unlike
+stdio. Each request resolves its own token, so the equivalent check would be
+a `GET /v2/user` round trip added to every single tool call, to re-learn
+something the call's own first upstream request reports anyway. A bad token
+here surfaces as ClickUp's own 401, mapped to
+`Invalid ClickUp token. Check CLICKUP_API_KEY.`, on the first tool the client
+calls.
 
 - `Authorization: <token>` or `Authorization: Bearer <token>` (both accepted;
   the `Bearer ` prefix, if present, is stripped before the token is sent to

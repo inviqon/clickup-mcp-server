@@ -1,6 +1,13 @@
+import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { assertApiKeyPresent, logReadiness } from '../../src/bin/stdio.js'
+import { assertApiKeyPresent, assertTokenAccepted, logReadiness } from '../../src/bin/stdio.js'
 import { loadConfig } from '../../src/core/config.js'
+import { mswServer, useMsw } from '../support/msw.js'
+import { testContext } from '../support/context.js'
+
+const API = 'https://api.clickup.com/api'
+
+useMsw()
 
 describe('assertApiKeyPresent', () => {
   it('throws naming CLICKUP_API_KEY when the key is empty but present', () => {
@@ -35,5 +42,25 @@ describe('logReadiness', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     logReadiness(loadConfig(base))
     expect(spy).toHaveBeenCalledWith('clickup-mcp ready: mode=write')
+  })
+})
+
+// Spec section 10 promised a GET /v2/user probe that fails fast on a bad
+// token. getAuthorizedUser existed but only tools called it, so the stdio
+// transport started cleanly on a dead token and surfaced an opaque 401 on
+// whichever tool the agent happened to call first.
+describe('assertTokenAccepted', () => {
+  it('fails fast naming CLICKUP_API_KEY when ClickUp rejects the token', async () => {
+    mswServer.use(
+      http.get(`${API}/v2/user`, () => HttpResponse.json({ err: 'Token invalid', ECODE: 'OAUTH_025' }, { status: 401 })),
+    )
+    await expect(assertTokenAccepted(testContext())).rejects.toThrow(/GET \/v2\/user.*CLICKUP_API_KEY/s)
+  })
+
+  it('passes on a token ClickUp accepts', async () => {
+    mswServer.use(
+      http.get(`${API}/v2/user`, () => HttpResponse.json({ user: { id: 1, username: 'Alice' } })),
+    )
+    await expect(assertTokenAccepted(testContext())).resolves.toBeUndefined()
   })
 })

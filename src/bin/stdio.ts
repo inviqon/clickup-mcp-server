@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { loadConfig, type ServerConfig } from '../core/config.js'
-import { createContext } from '../core/context.js'
+import { createContext, type ClickUpContext } from '../core/context.js'
+import { toAgentMessage } from '../core/errors.js'
+import { getAuthorizedUser } from '../clickup/endpoints/workspace.js'
 import { logStderr } from '../core/logger.js'
 import { ALL_TOOLS } from '../tools/index.js'
 import { buildServer } from '../server.js'
@@ -29,6 +31,30 @@ export function assertApiKeyPresent(config: Pick<ServerConfig, 'apiKey'>): void 
 }
 
 /**
+ * Spec section 10's startup validation: a `GET /v2/user` probe that fails
+ * fast on a bad token, rather than starting cleanly and surfacing an opaque
+ * 401 on whichever tool the agent happens to call first. `assertApiKeyPresent`
+ * above only proves a token was SET; this proves ClickUp accepts it, and
+ * names the variable to fix when it does not.
+ *
+ * Deliberately stdio only. The HTTP transport resolves a different token per
+ * request, so the equivalent check there would be a probe on every single
+ * call - a round trip added to every tool invocation to re-learn something
+ * the first upstream call reports anyway. That difference is documented in
+ * the README.
+ */
+export async function assertTokenAccepted(ctx: ClickUpContext): Promise<void> {
+  try {
+    await getAuthorizedUser(ctx)
+  } catch (err) {
+    throw new Error(
+      `ClickUp rejected the configured token on startup (GET /v2/user): ${toAgentMessage(err)} ` +
+        'Check CLICKUP_API_KEY, and CLICKUP_TEAM_ID if the token is valid but cannot see that workspace.',
+    )
+  }
+}
+
+/**
  * The stdio transport's startup readiness line, gated by `LOG_LEVEL` (Task
  * 19 follow-up to Task 18): `info` level, so `LOG_LEVEL=warn` or `error`
  * suppresses it while the default `info` and `debug` both keep it. Exported
@@ -46,6 +72,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const config = loadConfig(process.env)
   assertApiKeyPresent(config)
   const context = createContext(config)
+  await assertTokenAccepted(context)
   const server = buildServer({ tools: ALL_TOOLS, config, contextFactory: () => context })
   await server.connect(new StdioServerTransport())
   logReadiness(config)
