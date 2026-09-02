@@ -319,8 +319,10 @@ Vitest plus MSW. Three layers:
 - Unit: date parsing, formatters, rate limiter, cache, mode and category
   filtering, error mapping. `format/`, `core/dates.ts` and `core/errors.ts`
   are the most heavily covered modules; the earlier claim of 100% coverage on
-  them was never true and is not a gate. The enforced floor is the aggregate
-  one below.
+  them was never true. Measured (branch coverage, `npm run coverage`, scoped
+  to `src/` only): `format/` ~92%, `core/dates.ts` ~90%, `core/errors.ts`
+  ~81%. These numbers drift as tests are added and are not themselves a gate;
+  the enforced floor is the aggregate one below.
 - Integration: every tool handler against MSW-mocked ClickUp endpoints, using
   fixtures captured from real response shapes. Covers success, empty result,
   404, 429 with retry, and malformed response for each tool.
