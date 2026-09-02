@@ -37,6 +37,23 @@ describe('clickup_get_my_day', () => {
     expect(md).toContain('No timer is currently running.')
   })
 
+  it('labels a tracked-today entry with no task as "no task", the same wording the running timer uses for the same fact', () => {
+    // Pins the wording chosen when the tracked-today line and the running-
+    // timer line were consolidated onto one "no task" phrase - this line
+    // used to say "Untracked" while every other time-entry view said
+    // "no task" for the identical case.
+    const out = {
+      date: '2026-09-02',
+      tracked_today: {
+        total: '1h 0m',
+        entries: [{ id: 'te-untracked', duration: '1h 0m' }],
+      },
+    }
+    const md = tool('clickup_get_my_day').render(out, testContext())
+    expect(md).toContain('- no task - 1h 0m')
+    expect(md).not.toContain('Untracked')
+  })
+
   it('does not fail the whole call when the overdue query fails, and the other sections still render', async () => {
     mswServer.use(...fx.myDayHandlers({ overdueFails: true }))
     const out = await tool('clickup_get_my_day').handler({}, testContext())
@@ -98,6 +115,30 @@ describe('clickup_get_my_day', () => {
     expect(md).toContain('## Overdue')
   })
 
+  it('fails both due-today and overdue, naming the /v2/user endpoint that actually failed, when the shared identity lookup itself fails', async () => {
+    // mePromise feeds both the due-today and overdue queries; neither can
+    // even form its request without it, so both reject with its failure.
+    // Pinning the actual message here rather than assuming it: the failed
+    // promise carries `{ resource: 'task', id: 'due today' | 'overdue' }`
+    // hints, but ClickUpApiError's default (non-403/404) branch renders
+    // the error's own endpoint and status rather than that hint, so the
+    // message correctly names "v2/user" and not a task.
+    mswServer.use(...fx.myDayHandlers({ meFails: true }))
+    const out = await tool('clickup_get_my_day').handler({}, testContext())
+
+    // Running timer and tracked time do not depend on mePromise and still
+    // succeed.
+    expect(out.running_timer?.task_name).toBe('Fix login redirect')
+    expect(out.tracked_today.total).toBe('3h 15m')
+
+    expect(out.due_today).toBeUndefined()
+    expect(out.due_today_error).toMatch(/v2\/user/)
+    expect(out.due_today_error).not.toMatch(/task/i)
+    expect(out.overdue).toBeUndefined()
+    expect(out.overdue_error).toMatch(/v2\/user/)
+    expect(out.overdue_error).not.toMatch(/task/i)
+  })
+
   it('issues at most five upstream requests: one shared identity resolution plus one each for the running timer, tracked time, due-today and overdue queries', async () => {
     const requestLog: string[] = []
     mswServer.use(...fx.myDayHandlers({ requestLog }))
@@ -127,6 +168,13 @@ describe('clickup_get_my_day', () => {
     const md = tool('clickup_get_my_day').render(out, testContext())
     expect(md).toContain('1h 23m')
     expect(md).toMatch(/started .*\+02:00/)
+  })
+
+  it('renders the running timer\'s task as "name (id)", the same label form clickup_get_current_timer uses', async () => {
+    mswServer.use(...fx.myDayHandlers())
+    const out = await tool('clickup_get_my_day').handler({}, testContext())
+    const md = tool('clickup_get_my_day').render(out, testContext())
+    expect(md).toContain('Running on Fix login redirect (86abc) -')
   })
 
   it('renders due and overdue tasks by name and id', async () => {

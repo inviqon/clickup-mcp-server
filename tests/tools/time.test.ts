@@ -71,6 +71,13 @@ describe('clickup_get_current_timer', () => {
     expect(out.task_name).toBe('Fix login redirect')
     expect(out.start).toMatch(/\+02:00/)
   })
+
+  it('renders the running task as "name (id)", the same label form every other time-entry view uses', async () => {
+    mswServer.use(...fx.runningTimerHandlers({ taskId: '86abc', taskName: 'Fix login redirect' }))
+    const out = await tool('clickup_get_current_timer').handler({}, testContext())
+    const md = tool('clickup_get_current_timer').render(out, testContext())
+    expect(md).toContain('Timer running on Fix login redirect (86abc) -')
+  })
 })
 
 describe('clickup_stop_timer', () => {

@@ -4,8 +4,10 @@ import { bulletList, nameWithId } from './common.js'
  * The shape every renderer in this file works from - matches
  * `TimeEntryOut` (src/clickup/endpoints/time.ts) field for field, but
  * declared independently so this module never has to import a
- * clickup/endpoints type just to describe what it renders (the same
- * separation `format/task.ts` keeps from `clickup/endpoints/tasks.ts`).
+ * clickup/endpoints type just to describe what it renders. `format/task.ts`
+ * does NOT keep this same separation - it imports `TaskOut` directly from
+ * `clickup/endpoints/tasks.ts` - so this is this file's own choice, not a
+ * project-wide convention every `format/` module follows.
  */
 export type TimeEntryLike = {
   id: string
@@ -20,13 +22,29 @@ export type TimeEntryLike = {
 }
 
 /**
+ * The subset of a time-entry-shaped object `timeEntryTaskLabel` actually
+ * reads. Narrower than `TimeEntryLike` on purpose: `clickup_get_my_day`'s
+ * running-timer view (`RunningTimerOut`, src/format/myday.ts) and
+ * `clickup_get_current_time_entry`'s render output (src/tools/time.ts) both
+ * carry `task_id`/`task_name` without the rest of `TimeEntryLike`'s fields,
+ * and both used to hand-roll this exact label logic locally rather than
+ * import it, which is how "no task" and "Untracked" ended up as two
+ * separately-worded answers to the same question. One helper, called from
+ * all three sites, is what keeps a fourth wording from appearing later.
+ */
+export type TimeEntryTaskLabelSource = {
+  task_id?: string | undefined
+  task_name?: string | undefined
+}
+
+/**
  * The task label shared by every time-entry renderer: the task's name and
  * id when the entry is tied to one, or an explicit "no task" label when it
  * is not - never a blank or omitted mention, since "which task was this
  * time logged against" is exactly the kind of ambiguity reliability rule 4
  * says must be surfaced, not silently dropped.
  */
-export function timeEntryTaskLabel(out: TimeEntryLike): string {
+export function timeEntryTaskLabel(out: TimeEntryTaskLabelSource): string {
   return out.task_name !== undefined ? nameWithId(out.task_name, out.task_id ?? '') : 'no task'
 }
 

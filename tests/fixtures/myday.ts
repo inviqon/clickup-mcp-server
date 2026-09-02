@@ -56,6 +56,14 @@ export type MyDayHandlerOpts = {
   trackedFails?: boolean
   runningFails?: boolean
   /**
+   * Fails GET /v2/user itself, the shared identity lookup `mePromise` feeds
+   * to both the due-today and overdue queries. Neither of those two can even
+   * form its request without it, so both reject with this same failure -
+   * the running-timer and tracked-time queries do not depend on it and
+   * still succeed.
+   */
+  meFails?: boolean
+  /**
    * Makes the overdue query return an unbroken supply of full 100-task
    * pages that never report fewer than 100 - modelling an overdue backlog
    * large enough that `walkTaskPages`'s 5-page/500-task safety cap is what
@@ -86,6 +94,9 @@ export function myDayHandlers(opts: MyDayHandlerOpts = {}) {
   return [
     http.get(`${API}/v2/user`, ({ request }) => {
       log('GET', request)
+      if (opts.meFails) {
+        return HttpResponse.json({ err: 'Server error', ECODE: 'SRV_001' }, { status: 500 })
+      }
       return HttpResponse.json({ user: AUTH_USER })
     }),
 

@@ -1,4 +1,5 @@
 import { nameWithId } from './common.js'
+import { timeEntryTaskLabel } from './time.js'
 
 export type RunningTimerOut = {
   task_id?: string | undefined
@@ -7,6 +8,13 @@ export type RunningTimerOut = {
   elapsed: string
 }
 
+/**
+ * Deliberately carries `task_name` but no `task_id` - `id` here is the time
+ * entry's own id, not the task's. `toTrackedEntryOut` (src/tools/myday.ts)
+ * has the task id available from the underlying `TimeEntryOut` and drops
+ * it, so a tracked-today line reads as a bare task name rather than the
+ * "Name (id)" form the running timer and other time-entry views use.
+ */
 export type TrackedEntryOut = {
   id: string
   task_name?: string | undefined
@@ -80,8 +88,7 @@ export function renderMyDay(out: MyDayOut): string {
     lines.push('No timer is currently running.')
   } else {
     const rt = out.running_timer
-    const label = rt.task_name !== undefined ? nameWithId(rt.task_name, rt.task_id ?? '') : 'no task'
-    lines.push(`Running on ${label} - ${rt.elapsed} elapsed, started ${rt.started_at}.`)
+    lines.push(`Running on ${timeEntryTaskLabel(rt)} - ${rt.elapsed} elapsed, started ${rt.started_at}.`)
   }
 
   if (out.tracked_today_error !== undefined) {
@@ -94,7 +101,12 @@ export function renderMyDay(out: MyDayOut): string {
       '',
       ...out.tracked_today.entries.map(
         (e) =>
-          `- ${e.task_name !== undefined ? e.task_name : 'Untracked'} - ${e.duration}` +
+          // No `task_id` on `TrackedEntryOut` to build a `nameWithId` label
+          // from (see its doc comment above), so this reads the bare name
+          // rather than `timeEntryTaskLabel`'s "Name (id)" form - but it
+          // uses the SAME "no task" wording that form falls back to, not a
+          // second phrasing for the same fact.
+          `- ${e.task_name !== undefined ? e.task_name : 'no task'} - ${e.duration}` +
           `${e.description !== undefined && e.description.length > 0 ? `: ${e.description}` : ''}`,
       ),
     )

@@ -212,8 +212,7 @@ export const getCurrentTimerTool: ToolDefinition<typeof getCurrentTimerInputShap
     if (!out.running) {
       return 'No timer is currently running.'
     }
-    const label = out.task_name !== undefined ? nameWithId(out.task_name, out.task_id ?? '') : 'no task'
-    return `Timer running on ${label} - ${out.elapsed} elapsed, started ${out.start}.`
+    return `Timer running on ${timeEntryTaskLabel(out)} - ${out.elapsed} elapsed, started ${out.start}.`
   },
 }
 
