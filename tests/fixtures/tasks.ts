@@ -22,6 +22,32 @@ export const TEAM_ID = '9007'
 export const TASK_ID = '86abc'
 export const LIST_ID = '100'
 
+/**
+ * A description carrying every formatting feature ClickUp's plain
+ * `description` field destroys: a heading, a bold span, a code span and a
+ * checkbox. `MARKDOWN_DESCRIPTION_FLATTENED` is what ClickUp returns in
+ * `description` for the same task - the same words, none of the structure.
+ */
+export const MARKDOWN_DESCRIPTION = [
+  '# Repro steps',
+  '',
+  'The **SSO** path fails when `redirect_uri` is unset.',
+  '',
+  '- [ ] Confirm against staging',
+].join('\n')
+
+export const MARKDOWN_DESCRIPTION_FLATTENED = [
+  'Repro steps',
+  '',
+  'The SSO path fails when redirect_uri is unset.',
+  '',
+  'Confirm against staging',
+].join('\n')
+
+export function taskDetailBody(opts: { dueDate?: number | null } = {}) {
+  return baseTask(opts)
+}
+
 function baseTask(opts: { dueDate?: number | null } = {}) {
   const dueDate = opts.dueDate === undefined ? '1508369194377' : opts.dueDate === null ? null : String(opts.dueDate)
   return {
@@ -30,7 +56,16 @@ function baseTask(opts: { dueDate?: number | null } = {}) {
     custom_item_id: 0,
     name: 'Fix login bug',
     text_content: 'Users are unable to log in when SSO is enabled.',
-    description: 'Existing description',
+    // Real shape: `description` is ClickUp's flattened rendering (headings
+    // lose their level, bold loses its markers, code spans lose their
+    // backticks, a checkbox becomes an ordinary line) and
+    // `markdown_description` is the same text with its formatting intact -
+    // returned only because `getTaskDetail` passes
+    // `include_markdown_description=true`. Both are present here so a
+    // regression that reads the lossy one is visible in a test, not only
+    // against live data.
+    description: MARKDOWN_DESCRIPTION_FLATTENED,
+    markdown_description: MARKDOWN_DESCRIPTION,
     status: { id: 'p9007_a1', status: 'open', color: '#d3d3d3', orderindex: 0, type: 'open' },
     date_created: '1567780450202',
     date_updated: '1567780450202',

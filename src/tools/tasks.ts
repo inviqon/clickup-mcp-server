@@ -16,6 +16,7 @@ import {
   moveTaskHomeList,
   resolveCustomFields,
   setCustomFieldValue,
+  taskDescription,
   toTaskOut,
   toTaskSummary,
   updateTaskRaw,
@@ -361,7 +362,12 @@ export const createTaskTool: ToolDefinition<typeof createTaskInputShape, typeof 
 
     const body = omitEmpty({
       name: args.name,
-      description: args.description,
+      // `markdown_content`, not `description`: ClickUp's own contract says
+      // markdown_content wins when both are sent, and it is the only write
+      // field that preserves headings, bold, code spans and checkboxes.
+      // Create and update use the same field so a task's description
+      // survives the read/append/write round trip either tool starts.
+      markdown_content: args.description,
       status: args.status,
       assignees: args.assignees !== undefined ? args.assignees.map(toAssigneeId) : undefined,
       tags: args.tags,
@@ -444,8 +450,16 @@ const updateTaskInputShape = {
     .describe('append (default) keeps the existing description; overwrite replaces it'),
 }
 
-function appendDescription(current: string | null | undefined, addition: string): string {
-  return current !== null && current !== undefined && current.length > 0 ? `${current}\n\n${addition}` : addition
+/**
+ * Appends to the description the server actually read - the markdown form
+ * (`taskDescription`), not ClickUp's flattened `description`. Both halves of
+ * the round trip have to be markdown: read markdown, write it back through
+ * `markdown_content`. Reading the flattened form and PUTting it as the
+ * task's whole new description is what silently strips headings, bold,
+ * code spans and checkboxes from a task that had them.
+ */
+function appendDescription(current: string | undefined, addition: string): string {
+  return current !== undefined && current.length > 0 ? `${current}\n\n${addition}` : addition
 }
 
 export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof taskDetailOutputShape> = {
@@ -482,12 +496,13 @@ export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof 
       args.description !== undefined
         ? descriptionMode === 'overwrite'
           ? args.description
-          : appendDescription(current.description, args.description)
+          : appendDescription(taskDescription(current), args.description)
         : undefined
 
     const body = omitEmpty({
       name: args.name,
-      description,
+      // See clickup_create_task above for why this is `markdown_content`.
+      markdown_content: description,
       status: args.status,
       assignees: args.assignees !== undefined ? { add: args.assignees.map(toAssigneeId) } : undefined,
       tags: args.tags,

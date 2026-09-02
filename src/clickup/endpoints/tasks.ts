@@ -22,13 +22,22 @@ import {
  * a second round trip to get what one query parameter already provides.
  * Callers that do not need subtasks simply ignore the (possibly absent)
  * field - the extra parameter costs nothing when there are none.
+ *
+ * `include_markdown_description=true` is always sent for the same reason
+ * and a sharper one: without it ClickUp returns only `description`, the
+ * task's text flattened to plain lines - headings lose their level, code
+ * spans lose their backticks, checkboxes become ordinary lines. Every read
+ * path in this server feeds `clickup_update_task`'s default append mode,
+ * which reads a description back and PUTs it as the task's whole new
+ * description; reading the flattened form there would silently destroy the
+ * formatting of every task it touches. See `taskDescription` below.
  */
 export function getTaskDetail(ctx: ClickUpContext, taskId: string): Promise<TaskDetail> {
   return ctx.client.request({
     method: 'GET',
     path: `/task/${taskId}`,
     schema: TaskDetailSchema,
-    query: { include_subtasks: true },
+    query: { include_subtasks: true, include_markdown_description: true },
   })
 }
 
@@ -290,6 +299,31 @@ function formatMsField(value: string | null | undefined, timezone: string): stri
  * due date, an unset parent, or an empty tag list are all omitted rather
  * than rendered as a placeholder.
  */
+/**
+ * The task's description as this server reads, exposes and appends to it:
+ * the markdown form when ClickUp reported one, falling back to the
+ * flattened `description` only when it did not (a POST/PUT task response
+ * carries no `markdown_description`, since query parameters do not apply to
+ * a write). Returns `undefined` when the task genuinely has no description,
+ * so callers omit the field rather than writing an empty one.
+ *
+ * The order matters and is not cosmetic: `description` is lossy. Preferring
+ * it - or falling back to it while a markdown form exists - is what turns
+ * `clickup_update_task`'s append into a silent reformat of the whole
+ * description.
+ */
+export function taskDescription(task: TaskDetail): string | undefined {
+  const markdown = task.markdown_description
+  if (markdown !== null && markdown !== undefined && markdown !== '') {
+    return markdown
+  }
+  const plain = task.description
+  if (plain !== null && plain !== undefined && plain !== '') {
+    return plain
+  }
+  return undefined
+}
+
 export function toTaskOut(task: TaskDetail, ctx: ClickUpContext): TaskOut {
   const out: TaskOut = {
     id: task.id,
@@ -299,8 +333,9 @@ export function toTaskOut(task: TaskDetail, ctx: ClickUpContext): TaskOut {
     list_name: task.list.name,
     url: task.url,
   }
-  if (task.description !== null && task.description !== undefined && task.description !== '') {
-    out.description = task.description
+  const description = taskDescription(task)
+  if (description !== undefined) {
+    out.description = description
   }
   if (task.priority !== null && task.priority !== undefined) {
     out.priority = task.priority.priority

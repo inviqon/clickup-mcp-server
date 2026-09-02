@@ -307,8 +307,8 @@ describe('clickup_update_task', () => {
       }),
     )
     await tool('clickup_update_task').handler({ task_id: '86abc', description: 'New note' }, testContext())
-    expect(body.description).toContain('Existing description')
-    expect(body.description).toContain('New note')
+    expect(body.markdown_content).toContain('# Repro steps')
+    expect(body.markdown_content).toContain('New note')
   })
 
   it('BREAK CHECK: appending produces the existing text before the new text, not just a substring match', async () => {
@@ -320,7 +320,54 @@ describe('clickup_update_task', () => {
       }),
     )
     await tool('clickup_update_task').handler({ task_id: '86abc', description: 'New note' }, testContext())
-    expect(body.description).toBe('Existing description\n\nNew note')
+    expect(body.markdown_content).toBe(`${fx.MARKDOWN_DESCRIPTION}\n\nNew note`)
+  })
+
+  it('appends to the markdown description, keeping headings, bold, code spans and checkboxes', async () => {
+    let body: Record<string, unknown> = {}
+    mswServer.use(
+      ...fx.taskHandlers(),
+      ...fx.updateHandler((b) => {
+        body = b
+      }),
+    )
+    await tool('clickup_update_task').handler({ task_id: '86abc', description: 'New note' }, testContext())
+    const written = String(body.markdown_content)
+    expect(written).toContain('# Repro steps')
+    expect(written).toContain('**SSO**')
+    expect(written).toContain('`redirect_uri`')
+    expect(written).toContain('- [ ] Confirm against staging')
+    expect(written.endsWith('\n\nNew note')).toBe(true)
+    // The lossy field must not be what was read, nor what was written.
+    expect(written).not.toContain('Repro steps\n\nThe SSO path')
+    expect(body.description).toBeUndefined()
+  })
+
+  it('asks ClickUp for the markdown description rather than the flattened one', async () => {
+    const seen: string[] = []
+    mswServer.use(
+      http.get(`${API}/v2/task/86abc`, ({ request }) => {
+        seen.push(new URL(request.url).search)
+        return HttpResponse.json(fx.taskDetailBody())
+      }),
+      ...fx.updateHandler(() => {}),
+    )
+    await tool('clickup_get_task').handler({ task_id: '86abc' }, testContext())
+    expect(seen[0]).toContain('include_markdown_description=true')
+  })
+
+  it('falls back to the flattened description when ClickUp reports no markdown form', async () => {
+    let body: Record<string, unknown> = {}
+    mswServer.use(
+      http.get(`${API}/v2/task/86abc`, () =>
+        HttpResponse.json({ ...fx.taskDetailBody(), markdown_description: null, description: 'Plain only' }),
+      ),
+      ...fx.updateHandler((b) => {
+        body = b
+      }),
+    )
+    await tool('clickup_update_task').handler({ task_id: '86abc', description: 'New note' }, testContext())
+    expect(body.markdown_content).toBe('Plain only\n\nNew note')
   })
 
   it('overwrites only when explicitly asked', async () => {
@@ -335,7 +382,7 @@ describe('clickup_update_task', () => {
       { task_id: '86abc', description: 'Replaced', description_mode: 'overwrite' },
       testContext(),
     )
-    expect(body.description).toBe('Replaced')
+    expect(body.markdown_content).toBe('Replaced')
   })
 
   it('returns the task as the API reports it, not the input echo', async () => {

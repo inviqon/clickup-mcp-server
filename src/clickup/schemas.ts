@@ -315,12 +315,23 @@ export const GetTaskCommentsResponseSchema = z
  * reliability rule 2 - a task genuinely can have none of these set, and
  * that must come through as "absent" in this server's output, never as a
  * guessed value.
+ *
+ * `markdown_description` is the task's description with its formatting
+ * intact (headings, bold, code spans, checkboxes). ClickUp only returns it
+ * when `include_markdown_description=true` is passed - see `getTaskDetail`
+ * (src/clickup/endpoints/tasks.ts), which always passes it - so it is
+ * optional here: a write endpoint's own response (POST/PUT task) carries no
+ * query parameters and so never includes it. `description` is the same text
+ * flattened to plain lines and is only used as a fallback, never in
+ * preference: appending to the flattened form and writing it back is how a
+ * formatted description gets destroyed.
  */
 export const TaskDetailSchema = z
   .object({
     id: z.string(),
     name: z.string(),
     description: z.string().nullable().optional(),
+    markdown_description: z.string().nullable().optional(),
     status: TaskStatusSchema,
     priority: TaskPrioritySchema.nullable().optional(),
     tags: z.array(TaskTagSchema).default([]),
