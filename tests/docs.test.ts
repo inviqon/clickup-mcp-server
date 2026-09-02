@@ -29,7 +29,7 @@ describe('tool documentation', () => {
     }
   })
 
-  it('exactly 38 tools are registered', () => {
-    expect(ALL_TOOLS).toHaveLength(38)
+  it('exactly 39 tools are registered', () => {
+    expect(ALL_TOOLS).toHaveLength(39)
   })
 })

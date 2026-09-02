@@ -414,6 +414,65 @@ export const TaskSummarySchema = z.object({
 export type TaskSummary = z.infer<typeof TaskSummarySchema>
 
 /**
+ * One `current_status`/`status_history` entry from
+ * `GET /task/{task_id}/time_in_status` or its bulk variant. `status` and
+ * `total_time.by_minute` are both REQUIRED here (not `.nullable()` or
+ * `.optional()`), unlike most schemas in this file, which lean permissive.
+ * That is deliberate: ClickUp's own reference page documents that the
+ * "Total time in Status" ClickApp "must first be enabled by the Workspace
+ * owner or an admin" but does not document what the endpoint actually
+ * returns when it is not - no ECODE, no distinct HTTP status, nothing
+ * verified (see the increment report). A strict schema turns any response
+ * that does not carry a real status/by_minute pair into a schema-validation
+ * failure rather than a value that silently defaults to `0` -
+ * `getTaskTimeInStatusRaw`/`getTasksTimeInStatusBulkRaw`
+ * (src/clickup/endpoints/tasks.ts) treat exactly that failure as "cannot
+ * tell whether the ClickApp is enabled" and say so explicitly, rather than
+ * ever rendering a confident "0m".
+ */
+export const TimeInStatusPeriodSchema = z
+  .object({
+    status: z.string(),
+    color: z.string().optional(),
+    total_time: z
+      .object({
+        by_minute: z.number(),
+        since: z.union([z.string(), z.number()]).optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough()
+
+/**
+ * A `status_history` entry additionally carries `type`/`orderindex`, which
+ * `current_status` never does - otherwise identical to
+ * `TimeInStatusPeriodSchema` above.
+ */
+export const TimeInStatusHistoryEntrySchema = z
+  .object({
+    status: z.string(),
+    color: z.string().optional(),
+    type: z.string().optional(),
+    orderindex: z.number().optional(),
+    total_time: z
+      .object({
+        by_minute: z.number(),
+        since: z.union([z.string(), z.number()]).optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough()
+
+export const TaskTimeInStatusResponseSchema = z
+  .object({
+    current_status: TimeInStatusPeriodSchema,
+    status_history: z.array(TimeInStatusHistoryEntrySchema).default([]),
+  })
+  .passthrough()
+
+export type TaskTimeInStatusResponse = z.infer<typeof TaskTimeInStatusResponseSchema>
+
+/**
  * `POST /v2/task/{task_id}/comment`'s own response - a minimal
  * acknowledgement (id, hist_id, date), not a full comment object, unlike
  * `TaskCommentSchema` above which backs both places this server actually

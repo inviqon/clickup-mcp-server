@@ -1,6 +1,6 @@
 import type { ClickUpContext } from '../../core/context.js'
 import { formatDate, formatDurationHm } from '../../core/dates.js'
-import { ClickUpUsageError } from '../../core/errors.js'
+import { ClickUpSchemaError, ClickUpUsageError } from '../../core/errors.js'
 import { loadListMeta, type ListMeta } from './workspace.js'
 import { walkTaskPages } from '../pagination.js'
 import type { CommentOut } from '../../format/comment.js'
@@ -9,10 +9,12 @@ import {
   GetTaskCommentsResponseSchema,
   GetTasksResponseSchema,
   TaskDetailSchema,
+  TaskTimeInStatusResponseSchema,
   type Task,
   type TaskComment,
   type TaskDetail,
   type TaskSummary,
+  type TaskTimeInStatusResponse,
 } from '../schemas.js'
 
 // -- Raw endpoint calls ------------------------------------------------
@@ -443,4 +445,111 @@ export async function resolveCustomFields(
     }
     return { id: field.id, value }
   })
+}
+
+// -- Time in status ---------------------------------------------------------
+
+/**
+ * The message every "cannot tell whether the ClickApp is enabled" case uses
+ * (C1 and C2 both). Deliberately does NOT claim the ClickApp is definitely
+ * disabled: ClickUp's own reference page for both endpoints states only
+ * that the "Total time in Status" ClickApp "must first be enabled by the
+ * Workspace owner or an admin" - it documents no error response, ECODE, or
+ * distinct HTTP status for the disabled case, and none could be found or
+ * verified elsewhere (see the increment report). A shapeless or missing
+ * response is the most likely symptom of that, but this server cannot
+ * confirm it is the only possible cause, so the message says exactly that -
+ * an honest "cannot tell", never a confident diagnosis, and never a silent
+ * "0m".
+ */
+function timeInStatusUnavailableMessage(taskId: string, reason: 'shapeless' | 'missing'): string {
+  const what =
+    reason === 'shapeless'
+      ? "ClickUp's response for it did not carry the current_status/status_history shape (with a numeric " +
+        'total_time.by_minute) this server requires'
+      : "ClickUp's response did not mention it at all"
+  return (
+    `Time in status is not available for task ${taskId}: ${what}. This usually means the "Total time in Status" ` +
+    'ClickApp is not enabled for this workspace - it must be turned on by a Workspace owner or admin - but ' +
+    'ClickUp does not document what it returns when that ClickApp is disabled, so this could also be some other ' +
+    'unexpected condition (for "not mentioned at all": the id may also not exist, or not be visible to this ' +
+    'token). Either way, time in status cannot be reported for this task here - treat it as unknown, never as 0m.'
+  )
+}
+
+/**
+ * `GET /task/{task_id}/time_in_status`. Requires the "Total time in Status"
+ * ClickApp to be enabled for the workspace; `TaskTimeInStatusResponseSchema`
+ * requires `current_status`/`status_history` to carry a real numeric
+ * `total_time.by_minute`, so a response that does not (the shapeless case
+ * this server cannot otherwise distinguish from a disabled ClickApp) fails
+ * schema validation inside `ctx.client.request` as a `ClickUpSchemaError` -
+ * caught here specifically and re-thrown as a `ClickUpUsageError` so the
+ * message reaches the agent unwrapped (see `core/errors.ts`) rather than as
+ * a generic schema-validation complaint.
+ */
+export async function getTaskTimeInStatusRaw(ctx: ClickUpContext, taskId: string): Promise<TaskTimeInStatusResponse> {
+  try {
+    return await ctx.client.request({
+      method: 'GET',
+      path: `/task/${taskId}/time_in_status`,
+      schema: TaskTimeInStatusResponseSchema,
+    })
+  } catch (err) {
+    if (err instanceof ClickUpSchemaError) {
+      throw new ClickUpUsageError(timeInStatusUnavailableMessage(taskId, 'shapeless'))
+    }
+    throw err
+  }
+}
+
+// -- Normalised projections (time in status) ---------------------------------
+
+export type TimeInStatusPeriodOut = {
+  status: string
+  duration: string
+  since?: string | undefined
+}
+
+/**
+ * Formats one `current_status`/`status_history` entry: `by_minute` (a count
+ * of MINUTES per ClickUp's own documentation) is multiplied up to
+ * milliseconds before it ever reaches `formatDurationHm` - every other
+ * duration formatter in this server takes milliseconds, and this is exactly
+ * the kind of unit mismatch the increment brief calls out as where a fifth
+ * defect of this shape would appear. `since` is formatted through
+ * `formatDate`, the same offset-carrying timestamp form every other date in
+ * this server uses, and omitted (never a placeholder) when ClickUp did not
+ * report one.
+ */
+export function toTimeInStatusPeriodOut(
+  period: { status: string; total_time: { by_minute: number; since?: string | number | undefined } },
+  timezone: string,
+): TimeInStatusPeriodOut {
+  const out: TimeInStatusPeriodOut = {
+    status: period.status,
+    duration: formatDurationHm(period.total_time.by_minute * 60_000),
+  }
+  if (period.total_time.since !== undefined) {
+    out.since = formatDate(Number(period.total_time.since), timezone)
+  }
+  return out
+}
+
+export type TaskTimeInStatusOut = {
+  task_id: string
+  current_status: TimeInStatusPeriodOut
+  status_history: TimeInStatusPeriodOut[]
+}
+
+export function toTaskTimeInStatusOut(
+  taskId: string,
+  res: TaskTimeInStatusResponse,
+  timezone: string,
+): TaskTimeInStatusOut {
+  return {
+    task_id: taskId,
+    current_status: toTimeInStatusPeriodOut(res.current_status, timezone),
+    status_history: res.status_history.map((h) => toTimeInStatusPeriodOut(h, timezone)),
+  }
 }

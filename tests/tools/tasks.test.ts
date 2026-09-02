@@ -1,6 +1,8 @@
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import { TASK_TOOLS } from '../../src/tools/tasks.js'
+import { toAgentMessage } from '../../src/core/errors.js'
 import { mswServer, useMsw } from '../support/msw.js'
 import { testContext } from '../support/context.js'
 import * as fx from '../fixtures/tasks.js'
@@ -730,5 +732,59 @@ describe('clickup_link_tasks', () => {
     // The link call itself must still have gone through - this is not a
     // case where the write also failed.
     expect(seen.path).toBe('/api/v2/task/86abc/link/86other')
+  })
+})
+
+describe('clickup_get_task_time_in_status', () => {
+  it('converts by_minute (a count of MINUTES) to milliseconds before formatting - 90 minutes renders as "1h 30m", not "90m" or "0m"', async () => {
+    mswServer.use(...fx.taskTimeInStatusHandlers())
+    const out = await tool('clickup_get_task_time_in_status').handler({ task_id: '86abc' }, testContext())
+    expect(out.current_status.duration).toBe('1h 30m')
+    expect(out.status_history[0].duration).toBe('45m')
+  })
+
+  it('reports the current status name and its since timestamp with a timezone offset', async () => {
+    mswServer.use(...fx.taskTimeInStatusHandlers())
+    const out = await tool('clickup_get_task_time_in_status').handler({ task_id: '86abc' }, testContext())
+    expect(out.current_status.status).toBe('in progress')
+    expect(out.current_status.since).toMatch(/\+02:00/)
+  })
+
+  it('carries the prior status name, type and duration through status_history', async () => {
+    mswServer.use(...fx.taskTimeInStatusHandlers())
+    const out = await tool('clickup_get_task_time_in_status').handler({ task_id: '86abc' }, testContext())
+    expect(out.status_history).toHaveLength(1)
+    expect(out.status_history[0].status).toBe('open')
+    expect(out.status_history[0].since).toMatch(/\+02:00/)
+  })
+
+  it('states plainly that a task has no prior status history, rather than an empty section', async () => {
+    mswServer.use(...fx.taskTimeInStatusNoHistoryHandlers())
+    const out = await tool('clickup_get_task_time_in_status').handler({ task_id: '86abc' }, testContext())
+    expect(out.status_history).toEqual([])
+    const md = tool('clickup_get_task_time_in_status').render(out, testContext())
+    expect(md).toContain('86abc')
+    expect(md).toMatch(/no prior status history/i)
+  })
+
+  it('throws naming the Total Time in Status ClickApp when the response is shapeless, instead of reporting 0m', async () => {
+    mswServer.use(...fx.taskTimeInStatusDisabledClickAppHandlers())
+    await expect(
+      tool('clickup_get_task_time_in_status').handler({ task_id: '86abc' }, testContext()),
+    ).rejects.toThrow(/Total time in Status/)
+  })
+
+  it('the shapeless-response error reaches the agent unwrapped (ClickUpUsageError), not as "Unexpected error"', async () => {
+    mswServer.use(...fx.taskTimeInStatusDisabledClickAppHandlers())
+    await tool('clickup_get_task_time_in_status')
+      .handler({ task_id: '86abc' }, testContext())
+      .then(
+        () => expect.fail('expected handler to throw'),
+        (err: unknown) => {
+          const message = toAgentMessage(err)
+          expect(message).not.toMatch(/^Unexpected error/)
+          expect(message).toMatch(/Total time in Status/)
+        },
+      )
   })
 })

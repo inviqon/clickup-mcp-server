@@ -1,4 +1,4 @@
-import type { TaskOut } from '../clickup/endpoints/tasks.js'
+import type { TaskOut, TimeInStatusPeriodOut } from '../clickup/endpoints/tasks.js'
 import { formatCommentLine } from './comment.js'
 import { bulletList, nameWithId } from './common.js'
 
@@ -83,6 +83,44 @@ export function renderBulkUpdateResult(out: BulkUpdateResult): string {
   }
   if (out.failed.length > 0) {
     lines.push('', '**Failed**', ...out.failed.map((f) => `- ${f.task_id}: ${f.error}`))
+  }
+  return lines.join('\n')
+}
+
+export type TaskTimeInStatusLike = {
+  task_id: string
+  current_status: TimeInStatusPeriodOut
+  status_history: TimeInStatusPeriodOut[]
+}
+
+/**
+ * Renders `clickup_get_task_time_in_status`. A task with a genuinely empty
+ * `status_history` (it has never changed status) gets an explicit sentence
+ * naming the task and its current status rather than a history table with
+ * no rows beneath it - an empty table still LOOKS like a result, exactly
+ * the ambiguity reliability rule 5 says must not be left for the reader to
+ * notice (the same reasoning `renderTimeReport`, src/format/time.ts,
+ * applies to a completely empty report).
+ */
+export function renderTaskTimeInStatus(out: TaskTimeInStatusLike): string {
+  const sinceSuffix = out.current_status.since !== undefined ? ` (since ${out.current_status.since})` : ''
+  const lines = [
+    `# Time in status for task ${out.task_id}`,
+    '',
+    `Current: **${out.current_status.status}** - ${out.current_status.duration}${sinceSuffix}`,
+  ]
+
+  if (out.status_history.length === 0) {
+    lines.push(
+      '',
+      `Task ${out.task_id} has no prior status history - it has been in "${out.current_status.status}" the whole time.`,
+    )
+    return lines.join('\n')
+  }
+
+  lines.push('', '| Status | Duration | Since |', '|---|---|---|')
+  for (const period of out.status_history) {
+    lines.push(`| ${period.status} | ${period.duration} | ${period.since ?? '-'} |`)
   }
   return lines.join('\n')
 }

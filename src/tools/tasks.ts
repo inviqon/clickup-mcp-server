@@ -11,6 +11,7 @@ import {
   deleteTaskRaw,
   getTaskComments,
   getTaskDetail,
+  getTaskTimeInStatusRaw,
   linkTasksRaw,
   listTasksRaw,
   moveTaskHomeList,
@@ -19,13 +20,14 @@ import {
   taskDescription,
   toTaskOut,
   toTaskSummary,
+  toTaskTimeInStatusOut,
   updateTaskRaw,
   type MoveTaskBody,
 } from '../clickup/endpoints/tasks.js'
 import { TaskSummarySchema, type TaskDetail } from '../clickup/schemas.js'
 import { nameWithId, omitUnset, paginate } from '../format/common.js'
 import { boundPage } from '../clickup/pagination.js'
-import { renderBulkUpdateResult, renderTask } from '../format/task.js'
+import { renderBulkUpdateResult, renderTask, renderTaskTimeInStatus } from '../format/task.js'
 import { toCommentOut } from '../format/comment.js'
 import { assertConfirmName } from './confirm.js'
 
@@ -792,6 +794,54 @@ export const linkTasksTool: ToolDefinition<typeof linkTasksInputShape, typeof li
   },
 }
 
+// ---------------------------------------------------------------------------
+// clickup_get_task_time_in_status
+// ---------------------------------------------------------------------------
+
+const timeInStatusPeriodOutputShape = {
+  status: z.string(),
+  duration: z.string(),
+  since: z.string().optional(),
+}
+
+const getTaskTimeInStatusInputShape = {
+  task_id: z.string(),
+}
+
+const taskTimeInStatusOutputShape = {
+  task_id: z.string(),
+  current_status: z.object(timeInStatusPeriodOutputShape),
+  status_history: z.array(z.object(timeInStatusPeriodOutputShape)),
+}
+
+export const getTaskTimeInStatusTool: ToolDefinition<
+  typeof getTaskTimeInStatusInputShape,
+  typeof taskTimeInStatusOutputShape
+> = {
+  name: 'clickup_get_task_time_in_status',
+  title: 'Get ClickUp Task Time In Status',
+  category: 'tasks',
+  mode: 'read',
+  description: [
+    'How long a task has spent in its current status, and in every status before it - each duration in',
+    '"1h 30m" form (never raw minutes or milliseconds). Requires the "Total time in Status" ClickApp to',
+    'be enabled for this workspace by a Workspace owner or admin. When ClickUp\'s response does not carry',
+    'the shape this needs, the call fails explicitly naming that ClickApp rather than ever reporting a',
+    'confident "0m" or an empty history - this project could not verify what ClickUp actually returns',
+    'when that ClickApp is disabled, so the failure is worded as "cannot tell", not a firm diagnosis. A',
+    'task with no prior status changes states that plainly instead of an empty section.',
+    'Examples: "how long has task 86abc been in review", "show the full status history and durations',
+    'for task 86abc".',
+  ].join(' '),
+  inputSchema: getTaskTimeInStatusInputShape,
+  outputSchema: taskTimeInStatusOutputShape,
+  handler: async (args, ctx) => {
+    const res = await getTaskTimeInStatusRaw(ctx, args.task_id)
+    return toTaskTimeInStatusOut(args.task_id, res, ctx.timezone)
+  },
+  render: (out) => renderTaskTimeInStatus(out),
+}
+
 export const TASK_TOOLS: AnyToolDefinition[] = [
   getTaskTool,
   listTasksTool,
@@ -801,4 +851,5 @@ export const TASK_TOOLS: AnyToolDefinition[] = [
   moveTaskTool,
   deleteTaskTool,
   linkTasksTool,
+  getTaskTimeInStatusTool,
 ] as unknown as AnyToolDefinition[]

@@ -645,3 +645,91 @@ export function linkHandlers(seen: LinkCall) {
     }),
   ]
 }
+
+// -- Time in status fixtures -------------------------------------------------
+
+/**
+ * One `current_status`/`status_history` entry as ClickUp's own reference
+ * page shapes it: `total_time.by_minute` is a count of MINUTES (never
+ * milliseconds) and `total_time.since` an epoch-millisecond string.
+ * `type`/`orderindex` are only ever present on a `status_history` entry,
+ * not on `current_status` - passed through here as optional so one helper
+ * builds both.
+ */
+function timeInStatusPeriod(opts: {
+  status: string
+  byMinute: number
+  since?: number
+  type?: string
+  orderindex?: number
+}) {
+  return {
+    status: opts.status,
+    color: '#d3d3d3',
+    ...(opts.type !== undefined ? { type: opts.type } : {}),
+    ...(opts.orderindex !== undefined ? { orderindex: opts.orderindex } : {}),
+    total_time: {
+      by_minute: opts.byMinute,
+      ...(opts.since !== undefined ? { since: String(opts.since) } : {}),
+    },
+  }
+}
+
+/**
+ * GET /v2/task/86abc/time_in_status - current status "in progress" for 90
+ * MINUTES (never milliseconds - see `timeInStatusPeriod` above), since a
+ * fixed CEST timestamp, with one prior status ("open", 45 minutes). The 90
+ * -> "1h 30m" conversion is the whole reason this fixture uses a value that
+ * is not a round number of hours: a test asserting the rendered/returned
+ * duration against this fixture can only pass if by_minute was actually
+ * multiplied up to milliseconds before formatting, not if minutes leaked
+ * through unconverted (which would render "90m", coincidentally still
+ * plausible-looking) or were mistaken for milliseconds (which would render
+ * "0m").
+ */
+export function taskTimeInStatusHandlers() {
+  return [
+    http.get(`${API}/v2/task/${TASK_ID}/time_in_status`, () =>
+      HttpResponse.json({
+        current_status: timeInStatusPeriod({ status: 'in progress', byMinute: 90, since: 1757000000000 }),
+        status_history: [
+          timeInStatusPeriod({ status: 'open', byMinute: 45, since: 1756997300000, type: 'open', orderindex: 0 }),
+        ],
+      }),
+    ),
+  ]
+}
+
+/**
+ * Same endpoint, a task that has never changed status: `current_status` is
+ * real (the task has genuinely been "open" for zero minutes since
+ * creation) and `status_history` is a genuinely empty array - distinct from
+ * the disabled-ClickApp case below, which is not a valid, empty response
+ * but a shapeless one.
+ */
+export function taskTimeInStatusNoHistoryHandlers() {
+  return [
+    http.get(`${API}/v2/task/${TASK_ID}/time_in_status`, () =>
+      HttpResponse.json({
+        current_status: timeInStatusPeriod({ status: 'open', byMinute: 0, since: 1757000000000 }),
+        status_history: [],
+      }),
+    ),
+  ]
+}
+
+/**
+ * A 200 response that is valid JSON but does not carry the
+ * current_status/status_history shape this server requires. ClickUp's own
+ * reference documents only that the "Total time in Status" ClickApp "must
+ * first be enabled by the Workspace owner or an admin" - it does not
+ * document what the endpoint actually returns when it is not, and no
+ * ECODE or error status for this specific case could be found or verified
+ * (see the increment report). Modelled here as the safest assumption this
+ * server can act on without inventing a shape that has not been verified:
+ * a 200 with an empty body, rather than a specific error code this project
+ * cannot confirm.
+ */
+export function taskTimeInStatusDisabledClickAppHandlers() {
+  return [http.get(`${API}/v2/task/${TASK_ID}/time_in_status`, () => HttpResponse.json({}))]
+}
