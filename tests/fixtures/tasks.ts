@@ -153,6 +153,8 @@ export function richTaskHandlers() {
       HttpResponse.json({
         id: '86rich',
         name: 'Ship the release',
+        // Real shape: ClickUp reports an estimate as raw milliseconds.
+        time_estimate: 5_400_000,
         description: 'Cut the release branch and tag it.',
         status: { status: 'in progress', color: '#a875ff', orderindex: 1, type: 'custom' },
         priority: { color: '#f8ae00', id: '2', orderindex: '2', priority: 'high' },

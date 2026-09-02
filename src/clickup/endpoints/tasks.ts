@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
-import { formatDate } from '../../core/dates.js'
+import { formatDate, formatDurationHm } from '../../core/dates.js'
 import { ClickUpUsageError } from '../../core/errors.js'
 import { loadListMeta, type ListMeta } from './workspace.js'
 import { walkTaskPages } from '../pagination.js'
@@ -356,7 +356,12 @@ export function toTaskOut(task: TaskDetail, ctx: ClickUpContext): TaskOut {
     out.start_date = startDate
   }
   if (task.time_estimate !== null && task.time_estimate !== undefined) {
-    out.time_estimate = String(task.time_estimate)
+    // Formatted, not stringified: the input side accepts "1h30m" and every
+    // other duration in this server (time entries, my-day totals) goes
+    // through `formatDurationHm`. Emitting raw milliseconds here made a
+    // task's estimate the one duration an agent had to convert itself, and
+    // the one rendered under a "(ms)" label nothing else used.
+    out.time_estimate = formatDurationHm(Number(task.time_estimate))
   }
   if (task.parent !== null && task.parent !== undefined) {
     out.parent = task.parent

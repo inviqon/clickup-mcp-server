@@ -19,7 +19,7 @@ export function renderTask(out: TaskOut): string {
       ['Priority', out.priority],
       ['Due', out.due_date],
       ['Start', out.start_date],
-      ['Time estimate (ms)', out.time_estimate],
+      ['Time estimate', out.time_estimate],
       ['Parent', out.parent],
       ['List', nameWithId(out.list_name, out.list_id)],
     ]),

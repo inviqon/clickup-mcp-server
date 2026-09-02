@@ -88,6 +88,19 @@ describe('clickup_get_task', () => {
     expect(md).toContain('Tagged and shipped.')
     expect(md).toMatch(/\+02:00/)
   })
+
+  // The input side accepts "1h30m" and every other duration in this server
+  // goes through formatDurationHm; a task's estimate came back as raw
+  // milliseconds under a "Time estimate (ms)" label nothing else used.
+  it('renders a time estimate as a duration, not raw milliseconds', async () => {
+    mswServer.use(...fx.richTaskHandlers())
+    const out = await tool('clickup_get_task').handler({ task_id: '86rich' }, testContext())
+    expect(out.time_estimate).toBe('1h 30m')
+    const md = tool('clickup_get_task').render(out, testContext())
+    expect(md).toContain('**Time estimate**: 1h 30m')
+    expect(md).not.toContain('5400000')
+    expect(md).not.toContain('(ms)')
+  })
 })
 
 describe('clickup_list_tasks', () => {
