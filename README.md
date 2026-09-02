@@ -10,7 +10,7 @@ It exists for two reasons:
 - **Rate limits are per API token, not per workspace.** Running your own
   server with client-side throttling and caching keeps a session inside the
   plan tier's limit instead of competing with a shared vendor-hosted server.
-- **Tool surface and response shape are ours to tune.** 36 tools, chosen and
+- **Tool surface and response shape are ours to tune.** 37 tools, chosen and
   shaped for what a daily-task-management agent actually needs, not a 1:1
   wrapper around every ClickUp endpoint. Responses are compact markdown by
   default (JSON on request), empty and null fields are omitted, and every
@@ -164,7 +164,7 @@ A generic Streamable HTTP MCP client configuration looks like:
 
 ## Tool reference
 
-36 tools across 8 categories: navigation (4), tasks (8), comments (3),
+37 tools across 8 categories: navigation (5), tasks (8), comments (3),
 structure (9), tags (2), time tracking (7), docs (2, read-only), daily (1).
 Every tool is one of three modes, which double as its MCP annotations
 (`annotationsFor`, `src/core/registry.ts`):

@@ -209,6 +209,57 @@ export const resolveMemberTool: ToolDefinition<typeof resolveMemberInputShape, t
 }
 
 // ---------------------------------------------------------------------------
+// clickup_list_members
+// ---------------------------------------------------------------------------
+
+const listMembersInputShape = {
+  limit: z.number().int().min(1).max(100).default(25).describe('Maximum members to return, default 25, max 100'),
+  offset: z.number().int().min(0).default(0).describe('Number of members to skip'),
+}
+
+const listMembersOutputShape = {
+  total: z.number(),
+  count: z.number(),
+  offset: z.number(),
+  items: z.array(memberMatchOutputShape),
+  has_more: z.boolean(),
+  next_offset: z.number().optional(),
+}
+
+export const listMembersTool: ToolDefinition<typeof listMembersInputShape, typeof listMembersOutputShape> = {
+  name: 'clickup_list_members',
+  title: 'List ClickUp Members',
+  category: 'navigation',
+  mode: 'read',
+  description: [
+    'List every member of the ClickUp workspace with id, username and email - for "who is in this',
+    'workspace", which clickup_resolve_member cannot answer on its own: it requires a non-empty',
+    'query and would need a substring guessed to match everyone. Use clickup_resolve_member instead',
+    'once you have a name, username or email fragment in hand and need the id it resolves to before',
+    'assigning a task to that person.',
+    'Examples: "who is in this workspace", "list every member", "how many people have access here".',
+  ].join(' '),
+  inputSchema: listMembersInputShape,
+  outputSchema: listMembersOutputShape,
+  handler: async ({ limit, offset }, ctx) => {
+    const members = await getTeamMembers(ctx)
+    return paginate(members.map(toMemberMatch), { offset, limit })
+  },
+  render: (out) => {
+    if (out.items.length === 0) {
+      return 'No workspace members found'
+    }
+    return [
+      '# Workspace members',
+      '',
+      `Showing ${out.count} of ${out.total}${out.has_more ? ' (more available, pass a higher offset)' : ''}`,
+      '',
+      ...out.items.map((m) => `- ${nameWithId(m.username, m.id)}${m.email ? ` <${m.email}>` : ''}`),
+    ].join('\n')
+  },
+}
+
+// ---------------------------------------------------------------------------
 // clickup_search_tasks
 // ---------------------------------------------------------------------------
 
@@ -315,5 +366,6 @@ export const NAVIGATION_TOOLS: AnyToolDefinition[] = [
   getWorkspaceTreeTool,
   getListTool,
   resolveMemberTool,
+  listMembersTool,
   searchTasksTool,
 ] as unknown as AnyToolDefinition[]

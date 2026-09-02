@@ -214,6 +214,48 @@ describe('clickup_resolve_member', () => {
   })
 })
 
+describe('clickup_list_members', () => {
+  it('returns every workspace member with id, username and email', async () => {
+    mswServer.use(...fx.memberHandlers())
+    const out = await tool('clickup_list_members').handler({}, testContext())
+    expect(out.total).toBe(3)
+    expect(out.items).toEqual([
+      { id: '1', username: 'Alice Anderson', email: 'alice@example.com' },
+      { id: '2', username: 'Bob Baker', email: 'bob@example.com' },
+      { id: '3', username: 'Carol Diaz', email: 'carol@example.com' },
+    ])
+  })
+
+  it('paginates with the documented envelope', async () => {
+    mswServer.use(...fx.memberHandlers())
+    const out = await tool('clickup_list_members').handler({ limit: 2 }, testContext())
+    expect(out).toMatchObject({ total: 3, count: 2, offset: 0, has_more: true, next_offset: 2 })
+    const rest = await tool('clickup_list_members').handler({ limit: 2, offset: 2 }, testContext())
+    expect(rest).toMatchObject({ total: 3, count: 1, offset: 2, has_more: false })
+    expect(rest).not.toHaveProperty('next_offset')
+  })
+
+  it('renders every member as a bulleted list with their email', async () => {
+    mswServer.use(...fx.memberHandlers())
+    const out = await tool('clickup_list_members').handler({}, testContext())
+    const md = tool('clickup_list_members').render(out, testContext())
+    expect(md).toContain('Alice Anderson (1) <alice@example.com>')
+    expect(md).toContain('Bob Baker (2) <bob@example.com>')
+    expect(md).toContain('Carol Diaz (3) <carol@example.com>')
+  })
+
+  it('says so explicitly when the workspace has no members', async () => {
+    mswServer.use(
+      http.get(`${API}/v2/team`, () =>
+        HttpResponse.json({ teams: [{ id: fx.TEAM_ID, name: 'Inviqon', members: [] }] }),
+      ),
+    )
+    const out = await tool('clickup_list_members').handler({}, testContext())
+    const md = tool('clickup_list_members').render(out, testContext())
+    expect(md).toBe('No workspace members found')
+  })
+})
+
 describe('clickup_search_tasks', () => {
   it('paginates with the documented envelope', async () => {
     mswServer.use(...fx.searchHandlers())
