@@ -255,9 +255,41 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
   const isoDateMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/)
   if (isoDateMatch !== null) {
     const [, yearStr, monthStr, dayStr] = isoDateMatch as [string, string, string, string]
-    if (!isValidCalendarDate(Number(yearStr), Number(monthStr), Number(dayStr))) {
+    const year = Number(yearStr)
+    const month = Number(monthStr)
+    const day = Number(dayStr)
+    if (!isValidCalendarDate(year, month, day)) {
       throw parseError(input)
     }
+
+    // An ISO string that carries no offset ("2026-09-05", or
+    // "2026-09-05T14:00") names a WALL CLOCK, and the only wall clock this
+    // server has is `timezone`. `Date.parse` resolves the date-only form in
+    // UTC and the date-time form in the host's own local zone, neither of
+    // which is necessarily the configured one: for a user in
+    // America/New_York, `due_date: "2026-09-05"` was set to September 4th,
+    // silently, while "today" resolved correctly. Routed through
+    // `zonedTimeToEpoch` like every other branch here, so all of them agree
+    // on which zone a bare date means. A form that DOES carry an offset
+    // (`Z`, `+02:00`) already names an instant and is left to `Date.parse`.
+    const local = trimmed.match(/^\d{4}-\d{2}-\d{2}(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?)?$/)
+    if (local !== null) {
+      const [, hourStr, minuteStr, secondStr] = local
+      const epochMs = zonedTimeToEpoch(
+        year,
+        month,
+        day,
+        hourStr !== undefined ? Number(hourStr) : 0,
+        minuteStr !== undefined ? Number(minuteStr) : 0,
+        secondStr !== undefined ? Number(secondStr) : 0,
+        timezone,
+      )
+      if (epochMs === null) {
+        throw parseError(input)
+      }
+      return { epochMs, iso: formatDate(epochMs, timezone) }
+    }
+
     const isoCandidate = Date.parse(trimmed)
     if (Number.isNaN(isoCandidate)) {
       throw parseError(input)

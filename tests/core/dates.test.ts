@@ -87,6 +87,34 @@ describe('resolveDate', () => {
       .toBe('2026-03-28T11:00:00+01:00')
   })
 
+  // A date-only ISO string names a wall clock, not an instant. `Date.parse`
+  // read it as UTC midnight, so for any user west of UTC
+  // clickup_create_task({due_date: "2026-09-05"}) set September 4th - and
+  // clickup_get_my_day derived dayStart, dayEnd and the displayed date from
+  // it, producing a short window labelled with the wrong day. Tested in
+  // New York specifically: in Berlin (UTC+2) a UTC regression still lands
+  // on the right calendar date and would pass unnoticed.
+  it('resolves a date-only ISO string to midnight in the configured timezone, not UTC', () => {
+    const r = resolveDate('2026-09-05', { timezone: 'America/New_York', now })
+    expect(r.iso).toBe('2026-09-05T00:00:00-04:00')
+    expect(r.epochMs).toBe(Date.parse('2026-09-05T04:00:00Z'))
+  })
+
+  it('resolves a date-only ISO string the same way "today" does', () => {
+    expect(resolveDate('2026-09-02', { timezone: tz, now }).epochMs)
+      .toBe(resolveDate('today', { timezone: tz, now }).epochMs)
+  })
+
+  it('resolves an offsetless ISO date-time in the configured timezone', () => {
+    expect(resolveDate('2026-09-05T14:00', { timezone: 'America/New_York', now }).iso)
+      .toBe('2026-09-05T14:00:00-04:00')
+  })
+
+  it('still honours an explicit offset rather than reinterpreting it', () => {
+    expect(resolveDate('2026-09-05T14:00:00+02:00', { timezone: 'America/New_York', now }).epochMs)
+      .toBe(Date.parse('2026-09-05T12:00:00Z'))
+  })
+
   it('rejects an ISO date with an out-of-range day instead of rolling over', () => {
     expect(() => resolveDate('2026-02-30', { timezone: tz, now }))
       .toThrow(/Could not parse date "2026-02-30"/)
