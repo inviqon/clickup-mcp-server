@@ -142,6 +142,10 @@ describe('clickup_list_tasks', () => {
     const md = tool('clickup_list_tasks').render(out, testContext())
     expect(md).toContain('(high)')
     expect(md).toContain('Tiemo Timtschenko')
+    // The no-priority task's own line must carry no priority parenthetical
+    // at all - not "()" or "(null)" - only the status bracket before it.
+    const noPriorityLine = md.split('\n').find((line: string) => line.includes('Write release notes'))
+    expect(noPriorityLine).toBe('- Write release notes (869etjby7) [open] - Tiemo Timtschenko')
   })
 
   it('reports an empty result naming the scope that produced it', async () => {

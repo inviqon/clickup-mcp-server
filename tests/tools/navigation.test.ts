@@ -319,6 +319,10 @@ describe('clickup_search_tasks', () => {
     const md = tool('clickup_search_tasks').render(out, testContext())
     expect(md).toContain('(high)')
     expect(md).toContain('Tiemo Timtschenko')
+    // The no-priority task's own line must carry no priority parenthetical
+    // at all - not "()" or "(null)".
+    const noPriorityLine = md.split('\n').find((line: string) => line.includes('Write release notes'))
+    expect(noPriorityLine).toBe('- Write release notes (869etjby7) [to do] - Backlog (101) - Tiemo Timtschenko')
   })
 
   it('formats due_date with the configured timezone offset, not raw epoch ms or a bare UTC ISO string (Finding B)', async () => {

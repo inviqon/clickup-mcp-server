@@ -51,6 +51,12 @@ describe('clickup_get_my_day', () => {
     const md = tool('clickup_get_my_day').render(out, testContext())
     expect(md).toContain('(high)')
     expect(md).toContain('Tiemo Timtschenko')
+    // The no-priority task's own line must carry no priority parenthetical
+    // at all - not "()" or "(null)".
+    const noPriorityLine = md.split('\n').find((line: string) => line.includes('Write release notes'))
+    expect(noPriorityLine).toBe(
+      `- Write release notes (869etjby7) [open] - due ${withoutPriority.due_date} - Tiemo Timtschenko`,
+    )
   })
 
   it('renders a section per area and omits an empty section entirely', async () => {
