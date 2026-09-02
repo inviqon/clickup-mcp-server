@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { AnyToolDefinition, ToolDefinition } from '../core/registry.js'
-import { createComment, getComments, updateComment } from '../clickup/endpoints/comments.js'
+import { createComment, updateComment } from '../clickup/endpoints/comments.js'
+import { getTaskComments } from '../clickup/endpoints/tasks.js'
 import { toAssigneeId } from './tasks.js'
 import { formatDate } from '../core/dates.js'
 import { omitEmpty, paginate } from '../format/common.js'
@@ -49,7 +50,7 @@ export const getCommentsTool: ToolDefinition<typeof getCommentsInputShape, typeo
   handler: async (args, ctx) => {
     const limit = args.limit ?? 25
     const offset = args.offset ?? 0
-    const comments = await getComments(ctx, args.task_id)
+    const comments = await getTaskComments(ctx, args.task_id)
     const items = comments.map((c) => toCommentOut(c, ctx.timezone))
     const page = paginate(items, { offset, limit })
     return { task_id: args.task_id, ...page }

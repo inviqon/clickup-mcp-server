@@ -1,4 +1,4 @@
-import type { Comment } from '../clickup/schemas.js'
+import type { TaskComment } from '../clickup/schemas.js'
 import { formatDate } from '../core/dates.js'
 
 export type CommentOut = {
@@ -9,20 +9,33 @@ export type CommentOut = {
 }
 
 /**
- * Projects a raw `Comment` into the compact shape `clickup_get_comments`
- * returns. `date` is always formatted through `formatDate` (offset-carrying
- * ISO 8601, the same helper every other date field in this server uses),
- * never left as ClickUp's raw epoch-millisecond value - a comment's
- * timestamp is data an agent reasons about ("what did they say and when"),
- * not a display-only nicety.
+ * Projects a raw `TaskComment` (the single comment schema shared by
+ * `clickup_get_comments` and `clickup_get_task`'s `include_comments` option
+ * - see `TaskCommentSchema`'s doc comment in schemas.ts) into the compact
+ * shape both tools return. `date` is always formatted through `formatDate`
+ * (offset-carrying ISO 8601, the same helper every other date field in this
+ * server uses), never left as ClickUp's raw epoch-millisecond value - a
+ * comment's timestamp is data an agent reasons about ("what did they say
+ * and when"), not a display-only nicety.
  */
-export function toCommentOut(comment: Comment, timezone: string): CommentOut {
+export function toCommentOut(comment: TaskComment, timezone: string): CommentOut {
   return {
     id: comment.id,
     author: comment.user.username,
     date: formatDate(Number(comment.date), timezone),
     text: comment.comment_text,
   }
+}
+
+/**
+ * Renders one comment as a single markdown bullet. Exported so that
+ * `clickup_get_task`'s comment section (src/format/task.ts) uses the exact
+ * same formatting as `clickup_get_comments` (`renderComments` below) rather
+ * than a second, separately-maintained rendering of the same fields - the
+ * two used to diverge on whether a timestamp appeared at all.
+ */
+export function formatCommentLine(comment: CommentOut): string {
+  return `- **${comment.author}** (${comment.date}): ${comment.text}`
 }
 
 /**
@@ -34,9 +47,5 @@ export function renderComments(taskId: string, comments: CommentOut[]): string {
   if (comments.length === 0) {
     return `Task ${taskId} has no comments.`
   }
-  return [
-    `# Comments on task ${taskId}`,
-    '',
-    ...comments.map((c) => `- **${c.author}** (${c.date}): ${c.text}`),
-  ].join('\n')
+  return [`# Comments on task ${taskId}`, '', ...comments.map(formatCommentLine)].join('\n')
 }

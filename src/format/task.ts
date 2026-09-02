@@ -1,4 +1,5 @@
 import type { TaskOut } from '../clickup/endpoints/tasks.js'
+import { formatCommentLine } from './comment.js'
 import { bulletList, nameWithId } from './common.js'
 
 /**
@@ -50,10 +51,7 @@ export function renderTask(out: TaskOut): string {
   }
 
   if (out.comments && out.comments.length > 0) {
-    lines.push('', '**Comments**')
-    for (const comment of out.comments) {
-      lines.push(`- ${comment.author}: ${comment.text}`)
-    }
+    lines.push('', '**Comments**', ...out.comments.map(formatCommentLine))
   }
 
   if (out.custom_field_errors && out.custom_field_errors.length > 0) {

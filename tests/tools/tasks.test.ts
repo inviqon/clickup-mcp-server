@@ -52,7 +52,22 @@ describe('clickup_get_task', () => {
       { task_id: '86abc', include_comments: true },
       testContext(),
     )
-    expect(withComments.comments).toEqual([{ id: 'c1', author: 'Bob Baker', text: 'Looks good to me.' }])
+    expect(withComments.comments).toEqual([
+      { id: 'c1', author: 'Bob Baker', date: expect.any(String), text: 'Looks good to me.' },
+    ])
+  })
+
+  it('renders an included comment\'s timestamp with its timezone offset, same as clickup_get_comments', async () => {
+    mswServer.use(...fx.taskHandlers())
+    const out = await tool('clickup_get_task').handler({ task_id: '86abc', include_comments: true }, testContext())
+    const md = tool('clickup_get_task').render(out, testContext())
+    // fx.taskHandlers's comment date (1568036964079, 2019-09-09) falls in
+    // Berlin's summer (CEST, +02:00) offset - the same instant
+    // tests/tools/comments.test.ts's own offset assertion uses, so a
+    // regression here (the raw epoch leaking through, or the offset being
+    // dropped) is caught the same way it is for clickup_get_comments.
+    expect(md).toMatch(/\+02:00/)
+    expect(md).not.toContain('1568036964079')
   })
 
   it('copies the task id verbatim rather than constructing it', async () => {
@@ -69,7 +84,9 @@ describe('clickup_get_task', () => {
     expect(md).toContain('**Priority**: high')
     expect(md).toContain('Bob Baker (2)')
     expect(md).toContain('Client (cf-1): Selectry')
-    expect(md).toContain('Bob Baker: Tagged and shipped.')
+    expect(md).toContain('**Bob Baker**')
+    expect(md).toContain('Tagged and shipped.')
+    expect(md).toMatch(/\+02:00/)
   })
 })
 

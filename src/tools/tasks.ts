@@ -25,6 +25,7 @@ import { TaskSummarySchema, type TaskDetail } from '../clickup/schemas.js'
 import { nameWithId, omitEmpty, paginate } from '../format/common.js'
 import { boundPage } from '../clickup/pagination.js'
 import { renderBulkUpdateResult, renderTask } from '../format/task.js'
+import { toCommentOut } from '../format/comment.js'
 
 const PRIORITY_TO_INT: Record<'urgent' | 'high' | 'normal' | 'low', number> = {
   urgent: 1,
@@ -99,7 +100,7 @@ const taskDetailOutputShape = {
   list_name: z.string(),
   url: z.string(),
   subtasks: z.array(z.object({ id: z.string(), name: z.string(), status: z.string() })).optional(),
-  comments: z.array(z.object({ id: z.string(), author: z.string(), text: z.string() })).optional(),
+  comments: z.array(z.object({ id: z.string(), author: z.string(), date: z.string(), text: z.string() })).optional(),
   custom_field_errors: z.array(z.object({ field: z.string(), error: z.string() })).optional(),
 }
 
@@ -133,7 +134,7 @@ export const getTaskTool: ToolDefinition<typeof getTaskInputShape, typeof taskDe
     if (includeComments) {
       const comments = await getTaskComments(ctx, args.task_id)
       if (comments.length > 0) {
-        out.comments = comments.map((c) => ({ id: c.id, author: c.user.username, text: c.comment_text }))
+        out.comments = comments.map((c) => toCommentOut(c, ctx.timezone))
       }
     }
     return out

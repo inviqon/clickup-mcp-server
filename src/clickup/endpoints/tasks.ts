@@ -227,7 +227,7 @@ export async function listTasksRaw(ctx: ClickUpContext, filter: ListTasksFilter)
 // -- Normalised projections ---------------------------------------------
 
 export type SubtaskOut = { id: string; name: string; status: string }
-export type CommentOut = { id: string; author: string; text: string }
+export type CommentOut = { id: string; author: string; date: string; text: string }
 export type CustomFieldOut = { id: string; name: string; value: unknown }
 export type AssigneeOut = { id: string; username: string }
 

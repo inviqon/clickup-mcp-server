@@ -1,17 +1,18 @@
 import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
-import { CreateCommentResponseSchema, GetCommentsResponseSchema, type Comment } from '../schemas.js'
+import { CreateCommentResponseSchema } from '../schemas.js'
 
 const EmptyResponseSchema = z.object({}).passthrough()
 
-export async function getComments(ctx: ClickUpContext, taskId: string): Promise<Comment[]> {
-  const res = await ctx.client.request({
-    method: 'GET',
-    path: `/task/${taskId}/comment`,
-    schema: GetCommentsResponseSchema,
-  })
-  return res.comments
-}
+/**
+ * Reading a task's comments (`GET /task/{id}/comment`) lives in
+ * `./tasks.js` as `getTaskComments`, not here - it is shared by
+ * `clickup_get_comments` (this file's own tool, src/tools/comments.ts) and
+ * `clickup_get_task`'s `include_comments` option, and a second copy of it
+ * used to live in this file until it silently diverged from that one on
+ * whether `date` was declared at all. One function, imported by both
+ * callers, is what keeps that from happening again.
+ */
 
 export type CreateCommentResult = { id: string; hist_id: string; date: string | number }
 
@@ -36,12 +37,12 @@ export function createComment(
 }
 
 /**
- * `PUT /v2/comment/{comment_id}` returns an empty body on success - see
- * `CreateCommentResponseSchema`'s doc comment in schemas.ts for the same
- * shape on the create side. There is no "get one comment by id" endpoint in
- * ClickUp's API, so unlike a task write there is nothing to re-fetch here;
- * `clickup_update_comment` reports success by id alone rather than
- * inventing a confirmation read that does not exist.
+ * `PUT /v2/comment/{comment_id}` returns an empty body on success - unlike
+ * `createComment` above, whose `POST /task/{id}/comment` response carries
+ * `{id, hist_id, date}` rather than nothing. There is no "get one comment
+ * by id" endpoint in ClickUp's API, so unlike a task write there is
+ * nothing to re-fetch here; `clickup_update_comment` reports success by id
+ * alone rather than inventing a confirmation read that does not exist.
  */
 export async function updateComment(ctx: ClickUpContext, commentId: string, body: Record<string, unknown>): Promise<void> {
   await ctx.client.request({

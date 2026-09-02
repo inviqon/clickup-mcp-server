@@ -268,11 +268,29 @@ export const CommentAuthorSchema = z
   })
   .passthrough()
 
+/**
+ * The single comment shape shared by every comment-reading path in this
+ * server: `clickup_get_comments` (Task 12) and `clickup_get_task`'s
+ * `include_comments` option (Task 11) both fetch `GET /task/{id}/comment`
+ * and both parse its `comments[]` entries through this one schema - there
+ * is deliberately no second, comments.ts-local copy of it, so the two
+ * tools cannot drift on what a comment carries (see the fix note on
+ * `CreateCommentResponseSchema` below for the incident this schema used to
+ * cause by existing twice).
+ *
+ * `date` is declared as a string-or-number union: ClickUp's own docs show
+ * it as a string (an epoch-millisecond string, matching every other date
+ * field this server reads) on this list-comments shape, while the
+ * create-comment endpoint's own response (`CreateCommentResponseSchema`
+ * below) reports it as a genuine integer - accepted as either rather than
+ * assumed to agree.
+ */
 export const TaskCommentSchema = z
   .object({
     id: z.string(),
     comment_text: z.string(),
     user: CommentAuthorSchema,
+    date: z.union([z.string(), z.number()]),
   })
   .passthrough()
 
@@ -334,40 +352,23 @@ export const TaskSummarySchema = z.object({
 export type TaskSummary = z.infer<typeof TaskSummarySchema>
 
 /**
- * Comment-domain schemas (Task 12), sourced from ClickUp's "Get Task
- * Comments", "Create Task Comment" and "Update Comment" reference pages
- * linked from developer.clickup.com/docs/open-api-spec.md.
- *
- * `date` is declared as a string here deliberately: ClickUp's own docs show
- * it as a string (an epoch-millisecond string, matching every other date
- * field this server reads) on the comment-list shape, while the create
- * endpoint's own response reports it as a genuine integer - the two are
- * normalised together via a `z.union` on `date` rather than assumed to
- * agree.
- */
-export const CommentSchema = z
-  .object({
-    id: z.string(),
-    comment_text: z.string(),
-    user: CommentAuthorSchema,
-    date: z.union([z.string(), z.number()]),
-  })
-  .passthrough()
-
-export type Comment = z.infer<typeof CommentSchema>
-
-export const GetCommentsResponseSchema = z
-  .object({
-    comments: z.array(CommentSchema),
-  })
-  .passthrough()
-
-/**
  * `POST /v2/task/{task_id}/comment`'s own response - a minimal
- * acknowledgement (id, hist_id, date), not a full comment object. `date` is
- * documented as an integer here, unlike the string form `CommentSchema`
- * declares for the list endpoint - accepted as either rather than assumed
- * to match, the same normalisation `CommentSchema.date` applies.
+ * acknowledgement (id, hist_id, date), not a full comment object, unlike
+ * `TaskCommentSchema` above which backs both places this server actually
+ * reads a comment's full content back. `date` is documented as an integer
+ * here, unlike the string form `TaskCommentSchema.date` declares for the
+ * list endpoint - accepted as either rather than assumed to match, the
+ * same normalisation `TaskCommentSchema.date` applies.
+ *
+ * This server previously also had a second, near-identical schema here
+ * (`CommentSchema`/`GetCommentsResponseSchema`, added alongside a second
+ * `getComments` endpoint function) that duplicated `TaskCommentSchema`
+ * above rather than reusing it. The two silently diverged on whether
+ * `date` was declared at all, which meant `clickup_get_comments` rendered
+ * an offset-carrying timestamp while `clickup_get_task(include_comments:
+ * true)` - reading the exact same `GET /task/{id}/comment` response -
+ * silently dropped it. Removed; `TaskCommentSchema` is now the only
+ * comment-list schema in this server.
  */
 export const CreateCommentResponseSchema = z
   .object({
