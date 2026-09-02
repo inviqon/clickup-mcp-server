@@ -173,9 +173,18 @@ const FIELD_CATEGORY_EMPTY = {
   hide_from_guests: false,
 }
 
-export function listHandlers() {
+/**
+ * `overrides` lets a test replace one field of `LIST_100_DETAIL` without a
+ * parallel fixture object - used to exercise a real, non-empty `content`
+ * (a list's description), which the base fixture deliberately leaves `""`
+ * to match `LIST_101_BACKLOG` and keep every other test's expectations
+ * unchanged.
+ */
+export function listHandlers(
+  overrides: Partial<Omit<typeof LIST_100_DETAIL, 'content'>> & { content?: string | null } = {},
+) {
   return [
-    http.get(`${API}/v2/list/${LIST_IN_FOLDER_ID}`, () => HttpResponse.json(LIST_100_DETAIL)),
+    http.get(`${API}/v2/list/${LIST_IN_FOLDER_ID}`, () => HttpResponse.json({ ...LIST_100_DETAIL, ...overrides })),
     http.get(`${API}/v2/list/${LIST_IN_FOLDER_ID}/field`, () =>
       HttpResponse.json({ fields: [FIELD_CLIENT, FIELD_NOTES, FIELD_CATEGORY_EMPTY] }),
     ),

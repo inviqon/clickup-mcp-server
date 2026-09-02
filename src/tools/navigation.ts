@@ -93,6 +93,7 @@ const customFieldOutputShape = z.object({
 const listOutputShape = {
   id: z.string(),
   name: z.string(),
+  content: z.string().optional(),
   statuses: z.array(statusOutputShape),
   custom_fields: z.array(customFieldOutputShape),
 }
@@ -103,11 +104,13 @@ export const getListTool: ToolDefinition<typeof listInputShape, typeof listOutpu
   category: 'navigation',
   mode: 'read',
   description: [
-    'Get a ClickUp list with the statuses and custom field definitions available in it.',
-    'Call this before creating or updating a task in a list you have not written to yet:',
+    'Get a ClickUp list: its description, the statuses and custom field definitions available in',
+    'it. Call this before creating or updating a task in a list you have not written to yet:',
     'status names and custom field ids are list specific, and a wrong one is rejected by the API.',
+    'Also the way to read what a list is for, when its description says more than its name does.',
     'Use clickup_get_workspace_tree first if you do not know the list id.',
-    'Examples: "what statuses does Sprint 1 use", "which custom fields can I set on this list".',
+    'Examples: "what statuses does Sprint 1 use", "which custom fields can I set on this list",',
+    '"what is this list for".',
   ].join(' '),
   inputSchema: listInputShape,
   outputSchema: listOutputShape,
@@ -116,6 +119,7 @@ export const getListTool: ToolDefinition<typeof listInputShape, typeof listOutpu
     [
       `# ${nameWithId(out.name, out.id)}`,
       '',
+      ...(out.content !== undefined ? [out.content, ''] : []),
       `**Statuses**: ${out.statuses.map((s) => s.status).join(', ')}`,
       '',
       ...(out.custom_fields.length

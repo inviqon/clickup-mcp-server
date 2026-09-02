@@ -82,7 +82,7 @@ No input parameters.
 
 **Annotations**: readOnlyHint=true, destructiveHint=false, idempotentHint=true, openWorldHint=true
 
-Get a ClickUp list with the statuses and custom field definitions available in it. Call this before creating or updating a task in a list you have not written to yet: status names and custom field ids are list specific, and a wrong one is rejected by the API. Use clickup_get_workspace_tree first if you do not know the list id. Examples: "what statuses does Sprint 1 use", "which custom fields can I set on this list".
+Get a ClickUp list: its description, the statuses and custom field definitions available in it. Call this before creating or updating a task in a list you have not written to yet: status names and custom field ids are list specific, and a wrong one is rejected by the API. Also the way to read what a list is for, when its description says more than its name does. Use clickup_get_workspace_tree first if you do not know the list id. Examples: "what statuses does Sprint 1 use", "which custom fields can I set on this list", "what is this list for".
 
 **Input parameters**
 
@@ -94,6 +94,7 @@ Get a ClickUp list with the statuses and custom field definitions available in i
 
 - `id`: string
 - `name`: string
+- `content`: string (optional)
 - `statuses`: array of object {id, status, type}
 - `custom_fields`: array of object {id, name, type, options}
 

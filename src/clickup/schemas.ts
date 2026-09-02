@@ -125,10 +125,17 @@ export const ListStatusSchema = z
   })
   .passthrough()
 
+/**
+ * `content` is a list's description - nullable/absent on ClickUp's own
+ * response exactly like `ListWriteResponseSchema.content` above, for the
+ * same reason: a list created without one reports it as `null` or `""`,
+ * never a placeholder string.
+ */
 export const ListDetailSchema = z
   .object({
     id: z.string(),
     name: z.string(),
+    content: z.string().nullable().optional(),
     statuses: z.array(ListStatusSchema).default([]),
   })
   .passthrough()

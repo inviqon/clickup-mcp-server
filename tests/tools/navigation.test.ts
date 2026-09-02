@@ -136,6 +136,24 @@ describe('clickup_get_list', () => {
     expect(md).toContain('Category (cf-category) (drop_down)')
     expect(md).not.toMatch(/Category \(cf-category\) \(drop_down\):/)
   })
+
+  it('returns the list description as content when ClickUp reports a non empty one', async () => {
+    mswServer.use(...fx.listHandlers({ content: 'Tracks sprint work for the Engineering team.' }))
+    const out = await tool('clickup_get_list').handler({ list_id: '100' }, testContext())
+    expect(out.content).toBe('Tracks sprint work for the Engineering team.')
+    const md = tool('clickup_get_list').render(out, testContext())
+    expect(md).toContain('Tracks sprint work for the Engineering team.')
+  })
+
+  it('omits content rather than inventing an empty description when ClickUp reports "" or null', async () => {
+    mswServer.use(...fx.listHandlers({ content: '' }))
+    const out = await tool('clickup_get_list').handler({ list_id: '100' }, testContext())
+    expect(out).not.toHaveProperty('content')
+
+    mswServer.use(...fx.listHandlers({ content: null }))
+    const out2 = await tool('clickup_get_list').handler({ list_id: '100' }, testContext())
+    expect(out2).not.toHaveProperty('content')
+  })
 })
 
 describe('clickup_resolve_member', () => {

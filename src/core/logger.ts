@@ -1,5 +1,3 @@
-import type { ServerConfig } from './config.js'
-
 const LEVELS = ['debug', 'info', 'warn', 'error'] as const
 
 export type LogLevel = (typeof LEVELS)[number]
@@ -32,9 +30,4 @@ export function logStderr(configured: LogLevel, level: LogLevel, message: string
   if (shouldLog(configured, level)) {
     console.error(message)
   }
-}
-
-/** Convenience overload that reads the configured level off a `ServerConfig` directly. */
-export function log(config: Pick<ServerConfig, 'logLevel'>, level: LogLevel, message: string): void {
-  logStderr(config.logLevel, level, message)
 }

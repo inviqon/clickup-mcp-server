@@ -278,6 +278,8 @@ export type CustomFieldOut = {
 export type ListMeta = {
   id: string
   name: string
+  /** The list's description. Omitted, per reliability rule 2, when ClickUp reports it as null or "". */
+  content?: string
   statuses: StatusOut[]
   custom_fields: CustomFieldOut[]
 }
@@ -288,6 +290,7 @@ async function buildListMeta(ctx: ClickUpContext, listId: string): Promise<ListM
   return {
     id: list.id,
     name: list.name,
+    ...(list.content !== null && list.content !== undefined && list.content !== '' ? { content: list.content } : {}),
     statuses: list.statuses.map((s) => ({
       ...(s.id !== undefined ? { id: s.id } : {}),
       status: s.status,
