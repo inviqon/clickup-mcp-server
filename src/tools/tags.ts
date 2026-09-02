@@ -4,7 +4,7 @@ import { addTaskTag, listSpaceTags, removeTaskTag } from '../clickup/endpoints/t
 import { findSpaceForList, loadWorkspaceTree } from '../clickup/endpoints/workspace.js'
 import { getTaskDetail } from '../clickup/endpoints/tasks.js'
 import { refetchAfterWrite } from './tasks.js'
-import { ClickUpUsageError } from '../core/errors.js'
+import { ClickUpUsageError, toAgentMessage } from '../core/errors.js'
 
 // ---------------------------------------------------------------------------
 // clickup_list_space_tags
@@ -55,7 +55,20 @@ const setTaskTagsInputShape = {
 
 const setTaskTagsOutputShape = {
   task_id: z.string(),
+  /** The task's tags as ClickUp reports them after the writes, not the requested set. */
   tags: z.array(z.string()),
+  /**
+   * Present only when at least one add or remove failed. Each entry names
+   * the tag, which operation was attempted, and why it failed - the same
+   * partial-success shape `clickup_update_tasks_bulk` and
+   * `clickup_create_task`'s custom field writes already use. Without it a
+   * failure on the third of five left the task matching neither the before
+   * state nor the requested after state and reported a flat error, so the
+   * agent could not tell which half had taken.
+   */
+  failed: z
+    .array(z.object({ tag: z.string(), action: z.enum(['add', 'remove']), error: z.string() }))
+    .optional(),
 }
 
 export const setTaskTagsTool: ToolDefinition<typeof setTaskTagsInputShape, typeof setTaskTagsOutputShape> = {
@@ -104,21 +117,48 @@ export const setTaskTagsTool: ToolDefinition<typeof setTaskTagsInputShape, typeo
       return { task_id: args.task_id, tags: currentNames }
     }
 
+    // Every operation is attempted even after one fails, and the failures
+    // are reported rather than thrown: a bare throw on the third of five
+    // leaves the task matching neither the before state nor the requested
+    // after state, with nothing said about which half took. The refetch
+    // below is what makes `tags` the truth rather than the request.
+    const failed: Array<{ tag: string; action: 'add' | 'remove'; error: string }> = []
     for (const tag of toRemove) {
-      await removeTaskTag(ctx, args.task_id, tag)
+      try {
+        await removeTaskTag(ctx, args.task_id, tag)
+      } catch (err) {
+        failed.push({ tag, action: 'remove', error: toAgentMessage(err, { resource: 'tag', id: tag }) })
+      }
     }
     for (const tag of toAdd) {
-      await addTaskTag(ctx, args.task_id, tag)
+      try {
+        await addTaskTag(ctx, args.task_id, tag)
+      } catch (err) {
+        failed.push({ tag, action: 'add', error: toAgentMessage(err, { resource: 'tag', id: tag }) })
+      }
     }
 
     const refetched = await refetchAfterWrite(ctx, args.task_id, `Setting tags on task ${args.task_id}`)
-    return { task_id: args.task_id, tags: refetched.tags.map((t) => t.name) }
+    return {
+      task_id: args.task_id,
+      tags: refetched.tags.map((t) => t.name),
+      ...(failed.length > 0 ? { failed } : {}),
+    }
   },
   render: (out) => {
-    if (out.tags.length === 0) {
-      return `Task ${out.task_id} now has no tags.`
+    const lines = [
+      out.tags.length === 0
+        ? `Task ${out.task_id} now has no tags.`
+        : `Task ${out.task_id} now has tags: ${out.tags.join(', ')}`,
+    ]
+    if (out.failed !== undefined && out.failed.length > 0) {
+      lines.push(
+        '',
+        `**Warning: ${out.failed.length} tag change(s) did not take**`,
+        ...out.failed.map((f) => `- ${f.action} "${f.tag}": ${f.error}`),
+      )
     }
-    return `Task ${out.task_id} now has tags: ${out.tags.join(', ')}`
+    return lines.join('\n')
   },
 }
 

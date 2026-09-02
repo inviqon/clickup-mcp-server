@@ -184,6 +184,39 @@ describe('clickup_set_task_tags', () => {
     ).rejects.toThrow(/Could not resolve the space for task 86abc \(list unknown-list\)/)
   })
 
+  // A mid-loop failure used to throw, leaving the task matching neither the
+  // before state nor the requested after state and reporting a flat error.
+  // Every sibling multi-write tool (clickup_update_tasks_bulk, the custom
+  // field writes in create/update) names what took and what did not.
+  it('reports a partial write rather than failing the whole call', async () => {
+    let taskCalls = 0
+    mswServer.use(
+      ...treeFx.treeHandlers(),
+      http.get(`${API}/v2/task/86abc`, () => {
+        taskCalls += 1
+        // Pre-write: a, b, c. Post-write refetch: "a" was removed, "d" was
+        // added, and the failing "b" removal left "b" in place.
+        return HttpResponse.json(taskDetail({ tags: taskCalls === 1 ? ['a', 'b', 'c'] : ['b', 'c', 'd'] }))
+      }),
+      spaceTagsHandler(['a', 'b', 'c', 'd']),
+      http.delete(`${API}/v2/task/86abc/tag/b`, () =>
+        HttpResponse.json({ err: 'Server error', ECODE: 'SRV_001' }, { status: 500 }),
+      ),
+      http.delete(`${API}/v2/task/86abc/tag/:tagName`, () => HttpResponse.json({})),
+      http.post(`${API}/v2/task/86abc/tag/:tagName`, () => HttpResponse.json({})),
+    )
+    const out = await tool('clickup_set_task_tags').handler({ task_id: '86abc', tags: ['c', 'd'] }, testContext())
+    // The "a" removal and the "d" add still happened, and the result names
+    // the one that did not.
+    expect(out.tags).toEqual(['b', 'c', 'd'])
+    expect(out.failed).toEqual([
+      { tag: 'b', action: 'remove', error: expect.stringContaining('ClickUp API error (500)') },
+    ])
+    const md = tool('clickup_set_task_tags').render(out, testContext())
+    expect(md).toContain('1 tag change(s) did not take')
+    expect(md).toContain('remove "b"')
+  })
+
   it('renders the resulting tags when the task ends up with some', async () => {
     let taskCalls = 0
     mswServer.use(

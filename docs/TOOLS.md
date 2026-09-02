@@ -790,6 +790,7 @@ Set a task's tags to exactly the given set, replacing whatever it currently carr
 
 - `task_id`: string
 - `tags`: array of string
+- `failed`: array of object {tag, action, error} (optional)
 
 ## Time Tracking
 
