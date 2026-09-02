@@ -344,8 +344,8 @@ function reportEntry(opts: {
  * mock silently ignoring the filter, which is what the ambiguity test
  * needs to be a real test rather than a tautology.
  */
-export function reportTimeEntriesHandlers(opts: { seen?: URLSearchParams[] } = {}) {
-  const all = [
+export function reportTimeEntriesHandlers(opts: { seen?: URLSearchParams[]; empty?: boolean } = {}) {
+  const all = opts.empty ? [] : [
     reportEntry({
       id: 're-1',
       user: TIEMO,

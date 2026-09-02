@@ -89,3 +89,101 @@ export function formatTimeEntryLine(out: TimeEntryLike): string {
   const who = out.user !== undefined ? `${out.user.username} - ` : ''
   return `- ${who}${timeEntryTaskLabel(out)} - ${out.duration} (started ${out.start})${description}`
 }
+
+/**
+ * One row of `clickup_time_report`'s table - a member, list or space,
+ * depending on the report's `group_by`. `note` present means every numeric
+ * field is genuinely absent (the ambiguous "requested member, no visible
+ * entries" row); `note` absent means the numeric fields are real data.
+ */
+export type TimeReportGroupLike = {
+  key: string
+  label: string
+  entry_count?: number | undefined
+  total_duration?: string | undefined
+  billable_duration?: string | undefined
+  billable_share?: string | undefined
+  utilization?: string | undefined
+  note?: string | undefined
+}
+
+export type TimeReportLike = {
+  range: string
+  group_by: 'member' | 'list' | 'space'
+  groups: TimeReportGroupLike[]
+  overall: {
+    entry_count?: number | undefined
+    total_duration?: string | undefined
+    billable_duration?: string | undefined
+    billable_share?: string | undefined
+    note?: string | undefined
+  }
+}
+
+const GROUP_LABEL_HEADING: Record<TimeReportLike['group_by'], string> = {
+  member: 'Member',
+  list: 'List',
+  space: 'Space',
+}
+
+/**
+ * Renders `clickup_time_report` as one compact markdown table - the whole
+ * point of the tool is aggregation, so this deliberately never falls back
+ * to `formatTimeEntryLine`'s one-bullet-per-entry form the way
+ * `clickup_list_time_entries` does. A completely empty report (no groups at
+ * all - nothing was requested, or nothing was visible) renders as
+ * `overall.note` alone, with no empty table beneath it: an empty table
+ * still LOOKS like a result, which is exactly what reliability rule 5 (an
+ * empty result must be explicit) says not to leave to the reader to notice.
+ */
+export function renderTimeReport(out: TimeReportLike): string {
+  const heading = `# Time report for ${out.range}`
+
+  if (out.groups.length === 0) {
+    return [heading, '', out.overall.note ?? 'No time entries found.'].join('\n')
+  }
+
+  const groupLabel = GROUP_LABEL_HEADING[out.group_by]
+  const hasUtilization = out.groups.some((g) => g.utilization !== undefined)
+  const hasNote = out.groups.some((g) => g.note !== undefined)
+
+  const headerCells = [groupLabel, 'Entries', 'Total', 'Billable', 'Billable %']
+  if (hasUtilization) {
+    headerCells.push('Utilization')
+  }
+  if (hasNote) {
+    headerCells.push('Note')
+  }
+
+  const rows = out.groups.map((g) => {
+    const cells = [
+      nameWithId(g.label, g.key),
+      g.entry_count !== undefined ? String(g.entry_count) : '-',
+      g.total_duration ?? '-',
+      g.billable_duration ?? '-',
+      g.billable_share ?? '-',
+    ]
+    if (hasUtilization) {
+      cells.push(g.utilization ?? '-')
+    }
+    if (hasNote) {
+      cells.push(g.note ?? '')
+    }
+    return cells
+  })
+
+  const table = [
+    `| ${headerCells.join(' | ')} |`,
+    `|${headerCells.map(() => '---').join('|')}|`,
+    ...rows.map((r) => `| ${r.join(' | ')} |`),
+  ]
+
+  const overallLine =
+    out.overall.total_duration !== undefined
+      ? `Overall: ${out.overall.total_duration} across ${out.overall.entry_count} entr${out.overall.entry_count === 1 ? 'y' : 'ies'}` +
+        (out.overall.billable_share !== undefined ? ` (${out.overall.billable_share} billable)` : '') +
+        (out.overall.note !== undefined ? ` - ${out.overall.note}` : '')
+      : (out.overall.note ?? '')
+
+  return [heading, '', overallLine, '', ...table].join('\n')
+}

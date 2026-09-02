@@ -349,3 +349,211 @@ describe('clickup_list_time_entries', () => {
     expect(out.items[1]).not.toHaveProperty('space_id')
   })
 })
+
+describe('clickup_time_report', () => {
+  it('states the range it used, defaulting the same way clickup_list_time_entries does', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({}, testContext())
+    expect(out.range).toContain('last 7 days')
+  })
+
+  it('totals across every visible entry when no assignees are given', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({}, testContext())
+    expect(out.overall).toEqual({
+      entry_count: 3,
+      total_duration: '4h 30m',
+      billable_duration: '3h 30m',
+      billable_share: '78%',
+    })
+  })
+
+  it('groups by member by default, one row per member with real data', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({}, testContext())
+    expect(out.group_by).toBe('member')
+    expect(out.groups).toEqual([
+      {
+        key: '152549938',
+        label: 'Tiemo Timtschenko',
+        entry_count: 2,
+        total_duration: '3h',
+        billable_duration: '2h',
+        billable_share: '67%',
+      },
+      {
+        key: '105642832',
+        label: 'Arian Jusufi',
+        entry_count: 1,
+        total_duration: '1h 30m',
+        billable_duration: '1h 30m',
+        billable_share: '100%',
+      },
+    ])
+  })
+
+  it('groups by list when group_by is "list"', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({ group_by: 'list' }, testContext())
+    expect(out.groups).toEqual([
+      { key: '101', label: 'Sprint 1', entry_count: 2, total_duration: '3h', billable_duration: '2h', billable_share: '67%' },
+      { key: '102', label: 'Backlog', entry_count: 1, total_duration: '1h 30m', billable_duration: '1h 30m', billable_share: '100%' },
+    ])
+  })
+
+  it('groups by space when group_by is "space"', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({ group_by: 'space' }, testContext())
+    expect(out.groups).toEqual([
+      { key: '1', label: 'Engineering', entry_count: 2, total_duration: '3h', billable_duration: '2h', billable_share: '67%' },
+      { key: '2', label: 'Design', entry_count: 1, total_duration: '1h 30m', billable_duration: '1h 30m', billable_share: '100%' },
+    ])
+  })
+
+  it('does not include a member who was not explicitly requested', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({ assignees: ['152549938'] }, testContext())
+    expect(out.groups).toHaveLength(1)
+    expect(out.groups[0]!.key).toBe('152549938')
+  })
+
+  it('surfaces a requested member with no visible entries as an explicit ambiguity, not a bare 0h', async () => {
+    mswServer.use(...fx.reportTeamMembersHandlers(), ...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler(
+      { assignees: ['152549938', '999999999'] },
+      testContext(),
+    )
+    const tiemo = out.groups.find((g: any) => g.key === '152549938')
+    const ghost = out.groups.find((g: any) => g.key === '999999999')
+    expect(tiemo).toMatchObject({ total_duration: '3h' })
+    expect(tiemo.note).toBeUndefined()
+    expect(ghost).not.toHaveProperty('total_duration')
+    expect(ghost).not.toHaveProperty('entry_count')
+    expect(ghost.note).toMatch(/no.*entries.*visible|not.*visible/i)
+    expect(ghost.note).toMatch(/nothing.*tracked|permission/i)
+  })
+
+  it('resolves a single requested member with real data by their own entries, not a team lookup', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({ assignees: ['105642832'] }, testContext())
+    expect(out.groups).toEqual([
+      {
+        key: '105642832',
+        label: 'Arian Jusufi',
+        entry_count: 1,
+        total_duration: '1h 30m',
+        billable_duration: '1h 30m',
+        billable_share: '100%',
+      },
+    ])
+  })
+
+  it('reports a fully empty result explicitly, naming the range, when nothing was requested', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers({ empty: true }))
+    const out = await tool('clickup_time_report').handler({}, testContext())
+    expect(out.overall).not.toHaveProperty('entry_count')
+    expect(out.overall.note).toMatch(/No time entries found for/)
+    const md = tool('clickup_time_report').render(out, testContext())
+    expect(md).toMatch(/No time entries found for/)
+    expect(md).not.toContain('0h')
+  })
+
+  it('explains a fully empty result as an ambiguity when a member was explicitly requested', async () => {
+    mswServer.use(...fx.reportTeamMembersHandlers(), ...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({ assignees: ['999999999'] }, testContext())
+    expect(out.overall).not.toHaveProperty('entry_count')
+    expect(out.overall.note).toMatch(/permission|cannot read/i)
+    expect(out.groups).toHaveLength(1)
+    expect(out.groups[0]!.note).toBeDefined()
+  })
+
+  it('computes a utilization percentage only when weekly_capacity_hours is given', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    // An explicit, exactly-7-day range (rather than the default "7 days
+    // ago", whose gap to "now" is only approximately a week - see the
+    // "roughly a week" tolerance in clickup_list_time_entries's own default-
+    // range test above) so the pro-rated capacity is exactly 30h, not a
+    // value that depends on the millisecond this test happens to run at.
+    const range = { start_date: '2026-08-24T00:00:00+02:00', end_date: '2026-08-31T00:00:00+02:00' }
+    const withCapacity = await tool('clickup_time_report').handler(
+      { ...range, assignees: ['152549938'], weekly_capacity_hours: 30 },
+      testContext(),
+    )
+    // Tiemo logged 3h against a 30h capacity: round(3/30*100) = 10%.
+    expect(withCapacity.groups[0]!.utilization).toBe('10%')
+
+    const withoutCapacity = await tool('clickup_time_report').handler(
+      { ...range, assignees: ['152549938'] },
+      testContext(),
+    )
+    expect(withoutCapacity.groups[0]).not.toHaveProperty('utilization')
+  })
+
+  it('rejects weekly_capacity_hours when group_by is not "member"', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    await expect(
+      tool('clickup_time_report').handler({ group_by: 'list', weekly_capacity_hours: 40 }, testContext()),
+    ).rejects.toThrow(/weekly_capacity_hours/)
+  })
+
+  it('rejects more than one of space_id/folder_id/list_id at once', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    await expect(
+      tool('clickup_time_report').handler({ space_id: '1', list_id: '101' }, testContext()),
+    ).rejects.toThrow(/only one of space_id, folder_id, list_id, task_id/)
+  })
+
+  it('sends assignees as one comma separated parameter to the underlying time entries request', async () => {
+    const seen: URLSearchParams[] = []
+    mswServer.use(...fx.reportTimeEntriesHandlers({ seen }))
+    await tool('clickup_time_report').handler({ assignees: ['152549938', '105642832'] }, testContext())
+    expect(seen[0]!.get('assignee')).toBe('152549938,105642832')
+  })
+
+  it('renders a compact table, not one line per entry', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({}, testContext())
+    const md = tool('clickup_time_report').render(out, testContext())
+    expect(md).toContain('| Member | Entries | Total | Billable | Billable % |')
+    expect(md).not.toContain('started') // formatTimeEntryLine's per-entry wording never appears here
+  })
+
+  it('never renders a raw millisecond duration anywhere in the report', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const out = await tool('clickup_time_report').handler({}, testContext())
+    const md = tool('clickup_time_report').render(out, testContext())
+    expect(md).not.toMatch(/7200000|5400000|10800000/)
+    expect(JSON.stringify(out)).not.toMatch(/7200000|5400000|10800000/)
+  })
+
+  it('adds a Utilization column only when weekly_capacity_hours produced one', async () => {
+    mswServer.use(...fx.reportTimeEntriesHandlers())
+    const range = { start_date: '2026-08-24T00:00:00+02:00', end_date: '2026-08-31T00:00:00+02:00' }
+    const withCapacity = await tool('clickup_time_report').handler(
+      { ...range, assignees: ['152549938'], weekly_capacity_hours: 30 },
+      testContext(),
+    )
+    const mdWith = tool('clickup_time_report').render(withCapacity, testContext())
+    expect(mdWith).toContain('Utilization')
+    expect(mdWith).toContain('10%')
+
+    const withoutCapacity = await tool('clickup_time_report').handler({}, testContext())
+    const mdWithout = tool('clickup_time_report').render(withoutCapacity, testContext())
+    expect(mdWithout).not.toContain('Utilization')
+  })
+
+  it('adds a Note column with the ambiguity text only when a group carries one', async () => {
+    mswServer.use(...fx.reportTeamMembersHandlers(), ...fx.reportTimeEntriesHandlers())
+    const withGhost = await tool('clickup_time_report').handler(
+      { assignees: ['152549938', '999999999'] },
+      testContext(),
+    )
+    const mdWith = tool('clickup_time_report').render(withGhost, testContext())
+    expect(mdWith).toContain('Note')
+    expect(mdWith).toMatch(/nothing.*tracked|permission/i)
+
+    const withoutGhost = await tool('clickup_time_report').handler({}, testContext())
+    const mdWithout = tool('clickup_time_report').render(withoutGhost, testContext())
+    expect(mdWithout).not.toContain('| Note |')
+  })
+})
