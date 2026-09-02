@@ -1016,7 +1016,7 @@ Search the workspace's Docs by name. ClickUp has no server-side free-text search
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `query` | string | yes |  |  |
-| `limit` | integer | no | 10 |  |
+| `limit` | integer | no | 25 | Maximum docs to return, default 25, max 100 |
 | `offset` | integer | no | 0 |  |
 
 **Output fields**

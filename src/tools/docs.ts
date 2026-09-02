@@ -15,7 +15,7 @@ const namedRefOutputShape = {
 
 const searchDocsInputShape = {
   query: z.string().min(2),
-  limit: z.number().int().min(1).max(50).default(10),
+  limit: z.number().int().min(1).max(100).default(25).describe('Maximum docs to return, default 25, max 100'),
   offset: z.number().int().min(0).default(0),
 }
 

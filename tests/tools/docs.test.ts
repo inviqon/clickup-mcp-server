@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { describe, expect, it } from 'vitest'
 import { DOC_TOOLS } from '../../src/tools/docs.js'
 import { mswServer, useMsw } from '../support/msw.js'
@@ -67,6 +68,13 @@ describe('clickup_search_docs', () => {
     const out = await tool('clickup_search_docs').handler({ query: 'guide', limit: 10, offset: 0 }, testContext())
     const md = tool('clickup_search_docs').render(out, testContext())
     expect(md).toContain('Onboarding Guide (d-2)')
+  })
+
+  it('defaults limit to 25 and caps it at 100, the same as every other paged tool', () => {
+    const shape = z.object(tool('clickup_search_docs').inputSchema)
+    expect(shape.parse({ query: 'architecture' }).limit).toBe(25)
+    expect(shape.parse({ query: 'architecture', limit: 100 }).limit).toBe(100)
+    expect(() => shape.parse({ query: 'architecture', limit: 101 })).toThrow()
   })
 })
 
