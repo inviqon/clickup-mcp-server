@@ -1,7 +1,7 @@
 <evaluation>
   <qa_pair>
-    <question>In the space that contains a folder named Selectry, how many folders are there in total?</question>
-    <answer>5</answer>
+    <question>How many folders are in the space that contains the Selectry folder, and how many statuses are configured on the Landing Page list inside it?</question>
+    <answer>5, 3</answer>
   </qa_pair>
   <qa_pair>
     <question>Which folder in the workspace contains exactly two lists, and which of those two lists has a description mentioning a hidden job board?</question>
@@ -12,31 +12,31 @@
     <answer>3, complete</answer>
   </qa_pair>
   <qa_pair>
-    <question>Which space contains a list that sits directly in the space rather than inside a folder?</question>
-    <answer>Kunden</answer>
+    <question>Which space contains a list that sits directly in the space rather than inside a folder, and what is the name of the closed status on the Landing Page list in that space's Selectry folder?</question>
+    <answer>Kunden, complete</answer>
   </qa_pair>
   <qa_pair>
-    <question>How many spaces does the workspace contain, and which one has no folderless lists?</question>
-    <answer>2, Intern</answer>
+    <question>How many spaces does the workspace contain, which one of them has no folderless lists, and how many statuses are configured on the Landing Page list?</question>
+    <answer>2, Intern, 3</answer>
   </qa_pair>
   <qa_pair>
-    <question>The Intern space has three folders, each containing exactly one list. What name do all three lists share?</question>
-    <answer>List</answer>
+    <question>What name do the three lists inside the Intern space's folders share, and what is the name of the closed status on the Landing Page list in the Selectry folder?</question>
+    <answer>List, complete</answer>
   </qa_pair>
   <qa_pair>
-    <question>Which folder in the Kunden space contains no lists at all?</question>
-    <answer>AI-THINK</answer>
+    <question>Which folder in the Kunden space contains no lists at all, and how many custom fields are defined on the Landing Page list in that space's Selectry folder?</question>
+    <answer>AI-THINK, 0</answer>
   </qa_pair>
   <qa_pair>
-    <question>How many members does the workspace have, and what email domain do they share?</question>
-    <answer>2, inviqon.com</answer>
+    <question>What is the id of the space named Intern, and how many statuses are configured on the Landing Page list in the Kunden space's Selectry folder?</question>
+    <answer>90128984946, 3</answer>
   </qa_pair>
   <qa_pair>
     <question>How many custom fields are defined on the list named Landing Page in the Selectry folder?</question>
     <answer>0</answer>
   </qa_pair>
   <qa_pair>
-    <question>What is the id of the space named Intern?</question>
-    <answer>90128984946</answer>
+    <question>Resolve the workspace members whose names contain "Jusufi" and "Timtschenko". Do they use the same email domain, and if so, which one?</question>
+    <answer>Yes, inviqon.com</answer>
   </qa_pair>
 </evaluation>

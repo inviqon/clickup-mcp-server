@@ -15,6 +15,8 @@ describe('evaluation set', () => {
   })
 
   it('contains no time relative wording that would make answers unstable', () => {
-    expect(xml.toLowerCase()).not.toMatch(/\b(today|yesterday|this week|currently)\b/)
+    expect(xml.toLowerCase()).not.toMatch(
+      /\b(today|yesterday|now|currently|running|open tasks?|as of|(?:this|last|next) week)\b/,
+    )
   })
 })

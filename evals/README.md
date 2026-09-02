@@ -19,8 +19,31 @@ Each pair is:
 
 `tests/evals.test.ts` enforces the structural rules the set must keep:
 exactly ten pairs, a non-empty answer for every question, and no
-time-relative wording (`today`, `yesterday`, `this week`, `currently`) that
-would make an answer stop being reproducible.
+time-relative wording (`today`, `yesterday`, `now`, `currently`, `running`,
+`open task(s)`, `as of`, `this/last/next week`) that would make an answer
+stop being reproducible.
+
+Every pair also needs at least two tool calls to answer - one lookup to
+find where something lives (`clickup_get_workspace_tree`), then a second to
+inspect it (`clickup_get_list`, or a second `clickup_resolve_member` call
+with a different query) or to disambiguate a member. A question answerable
+from a single tool response is not a navigation test, it is a read test -
+`tests/` already covers those.
+
+## Scope
+
+This set exercises workspace navigation and structure only:
+`clickup_get_workspace_tree`, `clickup_get_list`, and `clickup_resolve_member`.
+It does not cover task filtering, time entry aggregation, comments, tags, or
+document lookup - most of the server's 36 tools are untouched by it. That is
+deliberate, not an oversight: the workspace snapshot this set is pinned to
+(see below) records structure, not task, time-entry, comment or doc content,
+and task state is inherently unstable (open counts change, running timers
+change) - exactly the kind of fact this set's own stability rule excludes.
+Those tools are covered by the unit and integration tests under `tests/`
+instead. Extending this set to cover them would need a stable, seeded
+fixture workspace built for the purpose - real task/time/doc data in a real
+workspace does not hold still long enough to pin an answer to it.
 
 ## Running the set
 
