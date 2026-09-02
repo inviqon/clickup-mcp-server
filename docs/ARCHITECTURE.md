@@ -37,8 +37,18 @@ scripts/
 
 Each layer only calls the one below it: `tools/` calls `clickup/endpoints/`
 and `format/`, never `clickup/client.ts` directly; `clickup/endpoints/` calls
-`clickup/client.ts`, never a tool. `core/` has no dependency on `clickup/`,
-`tools/`, or `format/` at all - it is the layer everything else is built on.
+`clickup/client.ts`, never a tool. `core/` has no dependency on `tools/` or
+`format/` - neither is ever imported from `core/`. It is NOT independent of
+`clickup/`, though: `core/context.ts` imports `ClickUpClient`
+(`src/clickup/client.ts`) at runtime to build a `ClickUpContext`, and
+`clickup/client.ts` in turn imports `core/errors.ts` and
+`core/rate-limiter.ts` - so `core/` and `clickup/` depend on each other, not
+one only on the other. What keeps this from being a real circular-import
+problem is that the edge going the other way, `clickup/endpoints/*.ts`
+depending on `ClickUpContext`, is a type-only import (`import type`), erased
+before either module runs; `core/` is still "the layer everything else is
+built on" in the sense that neither `tools/` nor `format/` ever reaches back
+into it in reverse, not in the sense of having zero edges toward `clickup/`.
 
 ## The tool contract
 
