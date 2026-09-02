@@ -4,7 +4,7 @@ import { createComment, updateComment } from '../clickup/endpoints/comments.js'
 import { getTaskComments } from '../clickup/endpoints/tasks.js'
 import { toAssigneeId } from './tasks.js'
 import { formatDate } from '../core/dates.js'
-import { omitEmpty, paginate } from '../format/common.js'
+import { omitUnset, paginate } from '../format/common.js'
 import { renderComments, toCommentOut } from '../format/comment.js'
 
 // ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ export const createCommentTool: ToolDefinition<typeof createCommentInputShape, t
   inputSchema: createCommentInputShape,
   outputSchema: createCommentOutputShape,
   handler: async (args, ctx) => {
-    const body = omitEmpty({
+    const body = omitUnset({
       comment_text: args.text,
       assignee: args.assignee !== undefined ? toAssigneeId(args.assignee) : undefined,
       notify_all: args.notify_all ?? false,
@@ -131,7 +131,7 @@ export const updateCommentTool: ToolDefinition<typeof updateCommentInputShape, t
   inputSchema: updateCommentInputShape,
   outputSchema: updateCommentOutputShape,
   handler: async (args, ctx) => {
-    const body = omitEmpty({
+    const body = omitUnset({
       comment_text: args.text,
       resolved: args.resolved,
     })

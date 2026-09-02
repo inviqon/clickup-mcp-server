@@ -107,6 +107,14 @@ describe('clickup_stop_timer', () => {
     expect(seen.called).toBe(false)
   })
 
+  it('clears the description when an explicit empty string is given', async () => {
+    const seen: fx.SeenRequest = { called: false }
+    mswServer.use(...fx.stopTimerHandlers({ seen }))
+    await tool('clickup_stop_timer').handler({ description: '' }, testContext())
+    expect(seen.called).toBe(true)
+    expect(seen.body).toEqual({ description: '' })
+  })
+
   it('clears every tag when an explicit empty array is given, rather than silently dropping the instruction', async () => {
     const seen: fx.SeenRequest = { called: false }
     mswServer.use(...fx.stopTimerHandlers({ seen }))
@@ -167,6 +175,16 @@ describe('clickup_update_time_entry', () => {
     mswServer.use(...fx.updateTimeEntryHandlers('te-1', seen))
     await tool('clickup_update_time_entry').handler({ entry_id: 'te-1', duration: '45m' }, testContext())
     expect(seen.body?.duration).toBe(2_700_000)
+  })
+
+  // Same class of defect the tags fix above addressed: an explicit ''
+  // is a request to clear the description, not an absent field, and
+  // `omitEmpty` used to drop it while the tool reported success.
+  it('sends an explicitly empty description rather than dropping it', async () => {
+    const seen: fx.SeenRequest = { called: false }
+    mswServer.use(...fx.updateTimeEntryHandlers('te-1', seen))
+    await tool('clickup_update_time_entry').handler({ entry_id: 'te-1', description: '' }, testContext())
+    expect(seen.body).toEqual({ description: '' })
   })
 
   it('replaces tags rather than adding to them', async () => {

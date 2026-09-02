@@ -17,7 +17,7 @@ import {
   updateSpaceRaw,
 } from '../clickup/endpoints/structure.js'
 import type { FolderDetail, ListWriteResponse, SpaceDetail } from '../clickup/schemas.js'
-import { omitEmpty, nameWithId } from '../format/common.js'
+import { omitUnset, nameWithId } from '../format/common.js'
 import { toAssigneeId } from './tasks.js'
 
 /**
@@ -125,7 +125,7 @@ function toFeaturesBody(
   if (features === undefined) {
     return undefined
   }
-  return omitEmpty({
+  return omitUnset({
     time_tracking: features.time_tracking !== undefined ? { enabled: features.time_tracking } : undefined,
     tags: features.tags !== undefined ? { enabled: features.tags } : undefined,
     due_dates: features.due_dates !== undefined ? { enabled: features.due_dates } : undefined,
@@ -147,7 +147,7 @@ export const createSpaceTool: ToolDefinition<typeof createSpaceInputShape, typeo
   inputSchema: createSpaceInputShape,
   outputSchema: spaceOutputShape,
   handler: async (args, ctx) => {
-    const body = omitEmpty({
+    const body = omitUnset({
       name: args.name,
       private: args.private ?? false,
       features: toFeaturesBody(args.features),
@@ -182,7 +182,7 @@ export const updateSpaceTool: ToolDefinition<typeof updateSpaceInputShape, typeo
   inputSchema: updateSpaceInputShape,
   outputSchema: spaceOutputShape,
   handler: async (args, ctx) => {
-    const body = omitEmpty({ name: args.name, private: args.private })
+    const body = omitUnset({ name: args.name, private: args.private })
     const updated = await updateSpaceRaw(ctx, args.space_id, body)
     ctx.cache.invalidate('tree:')
     return toSpaceOut(updated)
@@ -371,7 +371,7 @@ export const createListTool: ToolDefinition<typeof createListInputShape, typeof 
   handler: async (args, ctx) => {
     assertExactlyOneListParent(args)
 
-    const body = omitEmpty({
+    const body = omitUnset({
       name: args.name,
       content: args.content,
       due_date: args.due_date !== undefined ? resolveDate(args.due_date, { timezone: ctx.timezone }).epochMs : undefined,
@@ -414,7 +414,7 @@ export const updateListTool: ToolDefinition<typeof updateListInputShape, typeof 
   inputSchema: updateListInputShape,
   outputSchema: listOutputShape,
   handler: async (args, ctx) => {
-    const body = omitEmpty({ name: args.name, content: args.content, status: args.status })
+    const body = omitUnset({ name: args.name, content: args.content, status: args.status })
     const updated = await updateListRaw(ctx, args.list_id, body)
     ctx.cache.invalidate('tree:')
     ctx.cache.invalidate(`list:${args.list_id}`)

@@ -23,7 +23,7 @@ import {
   type MoveTaskBody,
 } from '../clickup/endpoints/tasks.js'
 import { TaskSummarySchema, type TaskDetail } from '../clickup/schemas.js'
-import { nameWithId, omitEmpty, paginate } from '../format/common.js'
+import { nameWithId, omitUnset, paginate } from '../format/common.js'
 import { boundPage } from '../clickup/pagination.js'
 import { renderBulkUpdateResult, renderTask } from '../format/task.js'
 import { toCommentOut } from '../format/comment.js'
@@ -360,7 +360,7 @@ export const createTaskTool: ToolDefinition<typeof createTaskInputShape, typeof 
     const resolvedFields =
       args.custom_fields !== undefined ? await resolveCustomFields(ctx, args.list_id, args.custom_fields) : []
 
-    const body = omitEmpty({
+    const body = omitUnset({
       name: args.name,
       // `markdown_content`, not `description`: ClickUp's own contract says
       // markdown_content wins when both are sent, and it is the only write
@@ -499,7 +499,7 @@ export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof 
           : appendDescription(taskDescription(current), args.description)
         : undefined
 
-    const body = omitEmpty({
+    const body = omitUnset({
       name: args.name,
       // See clickup_create_task above for why this is `markdown_content`.
       markdown_content: description,
@@ -585,7 +585,7 @@ export const updateTasksBulkTool: ToolDefinition<typeof bulkUpdateInputShape, ty
   inputSchema: bulkUpdateInputShape,
   outputSchema: bulkUpdateOutputShape,
   handler: async (args, ctx) => {
-    const body = omitEmpty({
+    const body = omitUnset({
       status: args.status,
       assignees: args.assignees !== undefined ? { add: args.assignees.map(toAssigneeId) } : undefined,
       priority: args.priority !== undefined ? PRIORITY_TO_INT[args.priority] : undefined,

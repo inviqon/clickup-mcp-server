@@ -13,7 +13,7 @@ import {
   updateTimeEntryRaw,
   type TimeEntryOut,
 } from '../clickup/endpoints/time.js'
-import { nameWithId, omitEmpty, paginate } from '../format/common.js'
+import { nameWithId, omitEmpty, omitUnset, paginate } from '../format/common.js'
 import { formatTimeEntryLine, renderTimeEntryLines, timeEntryTaskLabel } from '../format/time.js'
 import { toAssigneeId } from './tasks.js'
 
@@ -83,7 +83,7 @@ export const startTimerTool: ToolDefinition<typeof startTimerInputShape, typeof 
 
     const started = await startTimerRaw(
       ctx,
-      omitEmpty({
+      omitUnset({
         tid: args.task_id,
         description: args.description,
         billable: args.billable,
@@ -138,7 +138,7 @@ export const stopTimerTool: ToolDefinition<typeof stopTimerInputShape, typeof ti
       const updated = await updateTimeEntryRaw(
         ctx,
         stopped.id,
-        omitEmpty({
+        omitUnset({
           description: args.description,
           ...tagsBody(args.tags),
         }),
@@ -336,7 +336,7 @@ export const createTimeEntryTool: ToolDefinition<typeof createTimeEntryInputShap
 
     const created = await createTimeEntryRaw(
       ctx,
-      omitEmpty({
+      omitUnset({
         tid: args.task_id,
         start: startMs,
         duration: durationMs,
@@ -386,11 +386,11 @@ export const updateTimeEntryTool: ToolDefinition<typeof updateTimeEntryInputShap
     // "get one time entry by id" endpoint to read it back first), and this
     // tool's own input schema only takes `start`/`duration`, not `end`.
     // Deliberate choice: send exactly the fields the caller gave, via
-    // `omitEmpty`, rather than guessing a plausible `end` and risking a
+    // `omitUnset`, rather than guessing a plausible `end` and risking a
     // fabricated value reaching ClickUp. If updating `start` alone (without
     // `duration`) 400s in practice, that is the sign this assumption is
     // wrong and `end` needs to be resolved from a prior read instead.
-    const body = omitEmpty({
+    const body = omitUnset({
       start: args.start !== undefined ? resolveDate(args.start, { timezone: ctx.timezone }).epochMs : undefined,
       duration: args.duration !== undefined ? parseDuration(args.duration) : undefined,
       description: args.description,

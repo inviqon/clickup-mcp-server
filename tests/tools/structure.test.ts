@@ -221,6 +221,21 @@ describe('cache invalidation', () => {
     expect(spy).toHaveBeenCalledTimes(2)
   })
 
+  it('sends an explicitly empty list description rather than dropping it', async () => {
+    let body: Record<string, unknown> = {}
+    mswServer.use(
+      http.put(`${API}/v2/list/${treeFx.LIST_IN_FOLDER_ID}`, async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ id: treeFx.LIST_IN_FOLDER_ID, name: 'Sprint 1' })
+      }),
+    )
+    await tool('clickup_update_list').handler({ list_id: treeFx.LIST_IN_FOLDER_ID, content: '' }, testContext())
+    // '' is the only way to clear a list description. Dropping it as
+    // "empty" left the old text in place while the tool reported success.
+    expect(Object.keys(body)).toContain('content')
+    expect(body.content).toBe('')
+  })
+
   it('invalidates this list\'s own cached metadata after clickup_delete_list', async () => {
     const spy = vi.fn()
     mswServer.use(

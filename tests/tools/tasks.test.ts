@@ -385,6 +385,26 @@ describe('clickup_update_task', () => {
     expect(body.markdown_content).toBe('Replaced')
   })
 
+  // Write bodies used to be built through `omitEmpty`, which drops '' as
+  // "empty". An explicit empty string is not absence: it is the only way a
+  // caller can clear a description, and dropping it left the old text in
+  // place while the tool reported success.
+  it('sends an explicitly empty description rather than dropping it', async () => {
+    let body: Record<string, unknown> = {}
+    mswServer.use(
+      ...fx.taskHandlers(),
+      ...fx.updateHandler((b) => {
+        body = b
+      }),
+    )
+    await tool('clickup_update_task').handler(
+      { task_id: '86abc', description: '', description_mode: 'overwrite' },
+      testContext(),
+    )
+    expect(Object.keys(body)).toContain('markdown_content')
+    expect(body.markdown_content).toBe('')
+  })
+
   it('returns the task as the API reports it, not the input echo', async () => {
     mswServer.use(
       ...fx.taskHandlers(),

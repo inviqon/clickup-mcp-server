@@ -105,6 +105,35 @@ export function omitEmpty<T extends object>(obj: T): Partial<T> {
 }
 
 /**
+ * The write-body counterpart to `omitEmpty`: drops `undefined` and `null`,
+ * but KEEPS an explicit empty string.
+ *
+ * The distinction is the whole reason this exists separately. In rendering,
+ * `''` and "absent" mean the same thing and dropping both is correct. In a
+ * request body they are opposite instructions: not passing `description` is
+ * "leave it alone", passing `description: ""` is "clear it". Building write
+ * bodies through `omitEmpty` collapsed the two, so
+ * `clickup_update_task({description: "", description_mode: "overwrite"})`,
+ * `clickup_update_list({content: ""})`, `clickup_update_time_entry({description: ""})`
+ * and `clickup_stop_timer({description: ""})` each dropped the field, left
+ * the old value in place, and reported success - the caller believed the
+ * value was cleared and nothing said otherwise. This is the same defect the
+ * team already fixed for tags (see the comment in `clickup_stop_timer`,
+ * src/tools/time.ts), applied to the shared helper rather than one call
+ * site.
+ */
+export function omitUnset<T extends object>(obj: T): Partial<T> {
+  const result: Partial<T> = {}
+  for (const key of Object.keys(obj) as Array<keyof T>) {
+    const value = obj[key]
+    if (value !== undefined && value !== null) {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+/**
  * Renders `[label, value]` pairs as markdown bullets, skipping any entry
  * whose value is `undefined` rather than printing a placeholder for it.
  */
