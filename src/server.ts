@@ -108,6 +108,73 @@ export function fitToBudget(out: unknown, renderOne: (value: unknown) => string,
 }
 
 /**
+ * Sets `bounded: true` on an object payload, the same field name
+ * `clickup_list_tasks`, `clickup_search_tasks` and `clickup_get_my_day`
+ * already use for "this result is not the complete set" (an upstream page
+ * walk hitting its cap). A structured payload cut for size is the same
+ * fact from the caller's point of view - the items present are not all of
+ * them - so this reuses that flag rather than inventing a second word for
+ * it. A bare array (no current tool returns one at the top level, but
+ * `itemsOf`/`withItems` above stay generic over the case) has nowhere to
+ * carry a named field, so it is returned as-is.
+ */
+function withBounded(value: unknown): unknown {
+  return Array.isArray(value) ? value : { ...(value as Record<string, unknown>), bounded: true }
+}
+
+/**
+ * The `structuredContent` counterpart to `fitToBudget`: when the JSON
+ * payload itself exceeds the budget, drops whole items from the end -
+ * never bytes - until it fits, and flags the result via `withBounded`
+ * above. Dropping whole items keeps the payload valid against the tool's
+ * own `outputSchema`; a blind character cut of JSON would not (an earlier
+ * review ruled structuredContent should never be truncated for exactly
+ * this reason - revised once truncation moved from bytes to items, see
+ * the spec section this implements).
+ *
+ * A response with no item list (a single task, a doc page) cannot be
+ * item-truncated - returned unchanged rather than corrupted by a cut that
+ * would break its JSON. Kept genuinely unchanged (the same reference) when
+ * it already fits, so an under-budget response is byte-identical to what
+ * the handler returned, not a shallow copy of it.
+ */
+export function boundStructuredContent<T>(out: T, maxChars: number): T {
+  const full = JSON.stringify(out) ?? ''
+  if (full.length <= maxChars) {
+    return out
+  }
+
+  const items = itemsOf(out)
+  if (items === undefined || items.length === 0) {
+    return out
+  }
+
+  // Largest prefix of items whose JSON, plus the `bounded` flag, fits -
+  // the same bisection `fitToBudget` runs over the rendered text, just
+  // measured in JSON length instead of markdown length.
+  let lo = 0
+  let hi = items.length - 1
+  let best: unknown
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    const kept = items.slice(0, mid)
+    const candidate = withBounded(withItems(out, items, kept))
+    if (JSON.stringify(candidate).length <= maxChars) {
+      best = candidate
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
+  }
+
+  // Even zero items may not fit under a very small budget. Unlike
+  // `fitToBudget`, there is no character-cut fallback here - cutting JSON
+  // mid-string would corrupt it - so the floor is a valid envelope with an
+  // empty items array, still schema-valid, rather than nothing at all.
+  return (best ?? withBounded(withItems(out, items, []))) as T
+}
+
+/**
  * Wraps one `AnyToolDefinition` into the callback shape `McpServer.registerTool`
  * expects. Kept as its own function, rather than inlined in the registration
  * loop, purely for readability - the loop body would otherwise bury five
@@ -148,13 +215,16 @@ function makeWrapper(tool: AnyToolDefinition, config: ServerConfig, contextFacto
           : tool.render(value as Parameters<typeof tool.render>[0], ctx)
       const text = fitToBudget(out, renderOne, config.maxResponseChars)
       return {
-        // Deliberately the FULL result, never the truncated view: cutting
-        // structured content would produce a payload that violates the
-        // tool's own outputSchema, which is worse than a large one. The
-        // character budget bounds the rendered text; a client reading
-        // structuredContent gets everything. Documented in the README and
-        // spec section 6.
-        structuredContent: out,
+        // Bounded at ITEM granularity, same budget as the rendered text:
+        // dropping whole items and flagging it (`bounded: true`) keeps the
+        // payload valid against the tool's own outputSchema, unlike a byte
+        // cut would. This was ruled out entirely in an earlier review on
+        // the (correct, for byte truncation) grounds that truncating
+        // structuredContent breaks its schema - revised once truncation
+        // moved to item granularity. A response with no item list is
+        // returned unchanged: there is nothing to drop without corrupting
+        // its JSON. Documented in the README and spec section 6.
+        structuredContent: boundStructuredContent(out, config.maxResponseChars),
         content: [{ type: 'text', text }],
       }
     } catch (err) {

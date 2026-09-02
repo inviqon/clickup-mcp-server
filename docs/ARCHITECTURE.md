@@ -73,12 +73,14 @@ type ToolDefinition<TIn, TOut> = {
 
 `handler` returns the tool's `outputSchema` type, a plain object - it never
 builds a string. `server.ts`'s `makeWrapper` is the one place that turns that
-object into what the client actually receives: it emits the object verbatim
-as `structuredContent`, and separately renders `content` as either markdown
-(via the tool's own `render`) or `JSON.stringify(out)`, chosen by the caller's
-`response_format` argument. Three things follow from routing both outputs
-through one typed object instead of building markdown and JSON separately in
-each tool:
+object into what the client actually receives: it emits the object as
+`structuredContent` - bounded to `CLICKUP_MAX_RESPONSE_CHARS` at item
+granularity by `boundStructuredContent` when it carries an item list and
+exceeds the budget, unchanged otherwise - and separately renders `content` as
+either markdown (via the tool's own `render`) or `JSON.stringify(out)`,
+chosen by the caller's `response_format` argument. Three things follow from
+routing both outputs through one typed object instead of building markdown
+and JSON separately in each tool:
 
 - Markdown and JSON cannot drift from each other. There is exactly one source
   of truth per response - the object `handler` returned - and both

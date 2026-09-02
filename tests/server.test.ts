@@ -171,13 +171,38 @@ describe('buildServer - truncation and mode-scoped response_format', () => {
     expect(text.length).toBeLessThanOrEqual(200)
   })
 
-  it('sends the full result as structuredContent even when the text is truncated', async () => {
+  // Revises the earlier ruling ("document, do not truncate structuredContent")
+  // for the reason spelled out on `boundStructuredContent` (src/server.ts):
+  // that ruling is correct for a byte cut of JSON, which would produce a
+  // payload violating the tool's own outputSchema, and wrong for an item
+  // cut, which does not - dropping whole items and flagging it keeps the
+  // payload schema-valid.
+  it('drops items from structuredContent, not just the rendered text, when the payload itself exceeds the budget', async () => {
     const client = await connectWithEnv([paged], { CLICKUP_MAX_RESPONSE_CHARS: '200' })
     const res = await client.callTool({ name: 'clickup_paged', arguments: { value: 'x' } })
-    // Ruled deliberately: truncating structuredContent would produce a
-    // payload violating the tool's own outputSchema. The budget bounds the
-    // rendered text only.
-    expect((res.structuredContent as { items: unknown[] }).items).toHaveLength(40)
+    const structured = res.structuredContent as { items: unknown[]; count: number; bounded?: boolean }
+    expect(structured.items.length).toBeGreaterThan(0)
+    expect(structured.items.length).toBeLessThan(40)
+    expect(structured.count).toBe(structured.items.length)
+    expect(structured.bounded).toBe(true)
+    expect(JSON.stringify(structured).length).toBeLessThanOrEqual(200)
+  })
+
+  it('leaves structuredContent completely untouched when the payload is under budget', async () => {
+    const client = await connectWithEnv([paged], { CLICKUP_MAX_RESPONSE_CHARS: '1000000' })
+    const res = await client.callTool({ name: 'clickup_paged', arguments: { value: 'x' } })
+    const structured = res.structuredContent as { items: unknown[]; bounded?: boolean }
+    expect(structured.items).toHaveLength(40)
+    expect(structured.bounded).toBeUndefined()
+  })
+
+  it('leaves a response with no item list whole rather than corrupting its JSON, even over budget', async () => {
+    // `echo` (the non-paged tool this file uses everywhere else) has no
+    // item list to drop from - `boundStructuredContent` must return it
+    // unchanged rather than attempting a byte cut that would break the JSON.
+    const client = await connectWithEnv([big], { CLICKUP_MAX_RESPONSE_CHARS: '100' })
+    const res = await client.callTool({ name: 'clickup_big', arguments: { value: 'x' } })
+    expect((res.structuredContent as { value: string }).value).toBe('x'.repeat(500))
   })
 
   it('does not advertise response_format on a write mode tool, and a read tool still does', async () => {

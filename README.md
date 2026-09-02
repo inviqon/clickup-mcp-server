@@ -72,7 +72,7 @@ copy-pasteable template.
 | `CLICKUP_TIMEZONE` | the host's system timezone | IANA timezone (e.g. `Europe/Berlin`) used to resolve natural-language dates (`"tomorrow 17:00"`) and to render every date this server returns, so a mismatch between what you meant and what was resolved is visible rather than silent. |
 | `CLICKUP_CACHE_TTL_SECONDS` | `300` | How long the cached workspace tree and per-list metadata (statuses, custom fields) stay fresh before the next read re-fetches them. |
 | `CLICKUP_RATE_LIMIT` | `100` | Requests per minute the client-side token-bucket limiter allows, plan dependent - keeps this server's own calls inside your ClickUp plan tier's limit rather than relying on ClickUp's 429 responses alone. |
-| `CLICKUP_MAX_RESPONSE_CHARS` | `40000` | Character budget enforced on the *rendered text* of every tool response. A response over budget drops whole items from the end and appends a notice naming how many were dropped and the `offset` that fetches them. `structuredContent` is deliberately not truncated - see [Security and known limits](#security-and-known-limits). |
+| `CLICKUP_MAX_RESPONSE_CHARS` | `40000` | Character budget enforced on both the rendered text and the `structuredContent` of every tool response. A response over budget drops whole items from the end - the rendered text appends a notice naming how many were dropped and the `offset` that fetches them; `structuredContent` gains `bounded: true`, the same field `clickup_list_tasks` and `clickup_get_my_day` already use for a bounded result. A response with no item list (a single task, a doc page) cannot be item-truncated and is left whole - see [Security and known limits](#security-and-known-limits). |
 | `CLICKUP_HTTP_PORT` | `3000` | HTTP transport only: port to listen on. |
 | `CLICKUP_HTTP_HOST` | `127.0.0.1` | HTTP transport only: host to bind to. Binding anywhere other than loopback is a deliberate choice - see [Security](#security-and-known-limits). |
 | `CLICKUP_ALLOWED_ORIGINS` | none | HTTP transport only: comma separated list of `Origin` header values to accept. A request with no `Origin` header at all is always allowed (non-browser MCP clients never send one); a request that *does* carry an `Origin` is rejected unless it is in this list. |
@@ -283,13 +283,17 @@ accepts) to preview a different day instead of today.
   confirmed the end of the result set. Narrow the query (a list or space id,
   more specific filters) to search a smaller pool and get a result that is
   not just a probable answer.
-- **The character budget bounds the rendered text, not `structuredContent`.**
-  `CLICKUP_MAX_RESPONSE_CHARS` caps the markdown (or JSON) text view of a
-  response; a client that reads the `structuredContent` field receives the
-  full result regardless. That is deliberate: truncating structured content
-  would hand the client a payload that violates the tool's own
-  `outputSchema`, which is worse than a large one. Use `limit` and `offset`
-  to bound the actual result size when that matters.
+- **The character budget bounds both the rendered text and `structuredContent`,
+  at item granularity.** `CLICKUP_MAX_RESPONSE_CHARS` caps the markdown (or
+  JSON) text view of a response and the `structuredContent` field a client
+  reads directly; an over-budget response drops whole items from the end of
+  either, never a raw byte cut, so `structuredContent` always stays valid
+  against the tool's own `outputSchema` - the dropped-item notice appears in
+  the rendered text, and `bounded: true` appears in `structuredContent`
+  itself. A response with no item list (a single task, a doc page) has
+  nothing to drop and is left whole even when it exceeds the budget - only
+  the rendered text falls back to a character cut in that case. Use `limit`
+  and `offset` to bound the actual result size when that matters.
 - **Docs are read-only in this version.** There is no tool to create or edit
   a Doc or a Doc page.
 - **Chat, webhooks, goals, views, guests, user groups, audit logs, templates,
