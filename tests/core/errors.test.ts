@@ -41,4 +41,17 @@ describe('toAgentMessage', () => {
     expect(msg).not.toContain('at ')
     expect(msg).toContain('Unexpected error')
   })
+
+  it('gives a retry next step for a 429 with no resetAt', () => {
+    const e = new ClickUpApiError('rate limited', { status: 429, endpoint: '/v2/task/1' })
+    const msg = toAgentMessage(e)
+    expect(msg).toContain('rate limit')
+    expect(msg).toContain('retry')
+  })
+
+  it('gives a retry next step for an unmapped status code', () => {
+    const msg = toAgentMessage(err(500, '/v2/task/1'))
+    expect(msg).toContain('ClickUp API error (500)')
+    expect(msg).toContain('Retry')
+  })
 })

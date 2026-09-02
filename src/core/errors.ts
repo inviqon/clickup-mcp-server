@@ -1,8 +1,8 @@
 export type ClickUpApiErrorOptions = {
   status: number
   endpoint: string
-  ecode?: string
-  resetAt?: Date
+  ecode?: string | undefined
+  resetAt?: Date | undefined
 }
 
 export class ClickUpApiError extends Error {
@@ -65,7 +65,7 @@ function apiErrorMessage(err: ClickUpApiError, hint: AgentMessageHint | undefine
       return 'ClickUp rate limit hit. Wait a moment and retry.'
     }
     default:
-      return `ClickUp API error (${err.status}) calling ${err.endpoint}: ${err.message}`
+      return `ClickUp API error (${err.status}) calling ${err.endpoint}: ${err.message}. Retry, or check the ClickUp API status page if this persists.`
   }
 }
 

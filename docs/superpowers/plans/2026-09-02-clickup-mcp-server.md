@@ -27,6 +27,11 @@ Every task's requirements implicitly include this section.
 - Modern SDK APIs only: `server.registerTool`. Never `server.tool()` or manual `setRequestHandler`.
 - Default limit 25, maximum 100. Character budget default 40000.
 - TDD throughout: failing test first, minimal implementation, passing test, commit.
+- `npm run typecheck` type-checks `tests/` as well as `src/` and `scripts/`, via
+  `tsconfig.check.json`. The build tsconfig deliberately excludes `tests/` so test
+  files are not emitted, and vitest transpiles with esbuild without type checking,
+  so without this second config a type error in a test file is invisible to every
+  green signal the project produces.
 
 ## File Structure
 
@@ -77,7 +82,7 @@ Every task's requirements implicitly include this section.
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
@@ -98,7 +103,19 @@ Every task's requirements implicitly include this section.
 }
 ```
 
-- [ ] **Step 2: Create tsconfig.json**
+- [ ] **Step 2: Create tsconfig.json and tsconfig.check.json**
+
+`tsconfig.check.json` exists so type errors in tests cannot hide:
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+}
+```
+
+The build config:
 
 ```json
 {
