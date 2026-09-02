@@ -204,6 +204,12 @@ export function buildServer(opts: {
     // which would erase an unrecognised argument before the wrapper ever
     // saw it and defeat the strict re-parse below. Passthrough keeps it
     // visible so `z.strictObject` can reject it instead of a silent no-op.
+    // Side effect: the advertised JSON Schema this produces also gains
+    // `additionalProperties: {}` (loose objects permit arbitrary extra
+    // properties), which is the schema-level expression of the same
+    // passthrough choice - a client introspecting the tool's input schema
+    // sees that unrecognised keys are accepted at the wire level, even
+    // though the wrapper's own strict re-parse still rejects them.
     server.registerTool(
       tool.name,
       {

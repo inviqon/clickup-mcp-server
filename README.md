@@ -303,7 +303,7 @@ accepts) to preview a different day instead of today.
   only accepts `start`/`duration`. It sends exactly the fields you pass,
   rather than fabricating a plausible `end`. If updating `start` alone 400s
   in practice against your workspace, that is the sign this assumption needs
-  revisiting - see the comment above `updateTimeEntryTool` in
+  revisiting - see the comment inside `updateTimeEntryTool`'s handler in
   `src/tools/time.ts`.
 
 ## Development
