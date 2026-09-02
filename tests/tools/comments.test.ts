@@ -166,3 +166,15 @@ describe('clickup_update_comment', () => {
     expect(md).toBe(`Comment ${fx.COMMENT_ID} updated.`)
   })
 })
+
+describe('clickup_update_comment description', () => {
+  // The example list used to end with "mark comment 90010 as resolved",
+  // yet `text` is required and there is no endpoint to read a comment back.
+  // An agent following that example had to invent the text and would
+  // clobber the original.
+  it('does not offer an example that requires inventing the comment text', () => {
+    const description: string = tool('clickup_update_comment').description
+    expect(description).not.toMatch(/mark comment \d+ as resolved/)
+    expect(description).toMatch(/REPLACES the comment in full/)
+  })
+})

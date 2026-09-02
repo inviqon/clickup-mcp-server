@@ -3,9 +3,8 @@ import type { AnyToolDefinition, ToolDefinition } from '../core/registry.js'
 import { createComment, updateComment } from '../clickup/endpoints/comments.js'
 import { getTaskComments } from '../clickup/endpoints/tasks.js'
 import { toAssigneeId } from './tasks.js'
-import { formatDate } from '../core/dates.js'
 import { omitUnset, paginate } from '../format/common.js'
-import { renderComments, toCommentOut } from '../format/comment.js'
+import { formatCommentDate, renderComments, toCommentOut } from '../format/comment.js'
 
 // ---------------------------------------------------------------------------
 // clickup_get_comments
@@ -97,7 +96,7 @@ export const createCommentTool: ToolDefinition<typeof createCommentInputShape, t
       notify_all: args.notify_all ?? false,
     })
     const created = await createComment(ctx, args.task_id, body)
-    return { id: created.id, task_id: args.task_id, date: formatDate(Number(created.date), ctx.timezone) }
+    return { id: created.id, task_id: args.task_id, date: formatCommentDate(created.date, ctx.timezone) }
   },
   render: (out) => `Comment ${out.id} added to task ${out.task_id} at ${out.date}.`,
 }
@@ -125,8 +124,10 @@ export const updateCommentTool: ToolDefinition<typeof updateCommentInputShape, t
   description: [
     'Change a comment\'s text and, optionally, its resolved state. ClickUp has no endpoint to read',
     'back a single comment by id, so this confirms the write by id rather than echoing a re-fetched',
-    'comment that cannot be fetched.',
-    'Examples: "fix a typo in comment 90010", "mark comment 90010 as resolved".',
+    'comment that cannot be fetched - which also means this tool cannot merge your change into the',
+    'existing text. text REPLACES the comment in full, so pass the complete text you want it to end',
+    'up with, never a fragment.',
+    'Examples: "fix a typo in comment 90010", "replace comment 90010 with the corrected summary".',
   ].join(' '),
   inputSchema: updateCommentInputShape,
   outputSchema: updateCommentOutputShape,

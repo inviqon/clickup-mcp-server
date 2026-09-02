@@ -517,7 +517,7 @@ Add a comment to a ClickUp task. ClickUp's own create-comment response only conf
 
 **Annotations**: readOnlyHint=false, destructiveHint=false, idempotentHint=false, openWorldHint=true
 
-Change a comment's text and, optionally, its resolved state. ClickUp has no endpoint to read back a single comment by id, so this confirms the write by id rather than echoing a re-fetched comment that cannot be fetched. Examples: "fix a typo in comment 90010", "mark comment 90010 as resolved".
+Change a comment's text and, optionally, its resolved state. ClickUp has no endpoint to read back a single comment by id, so this confirms the write by id rather than echoing a re-fetched comment that cannot be fetched - which also means this tool cannot merge your change into the existing text. text REPLACES the comment in full, so pass the complete text you want it to end up with, never a fragment. Examples: "fix a typo in comment 90010", "replace comment 90010 with the corrected summary".
 
 **Input parameters**
 

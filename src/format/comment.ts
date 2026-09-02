@@ -22,9 +22,22 @@ export function toCommentOut(comment: TaskComment, timezone: string): CommentOut
   return {
     id: comment.id,
     author: comment.user.username,
-    date: formatDate(Number(comment.date), timezone),
+    date: formatCommentDate(comment.date, timezone),
     text: comment.comment_text,
   }
+}
+
+/**
+ * The one place a ClickUp comment timestamp becomes a string. ClickUp
+ * reports it as an epoch-millisecond string on the list-comments shape and
+ * as a genuine integer on the create-comment response, so both are accepted
+ * here rather than assumed to agree. `clickup_create_comment` cannot go
+ * through `toCommentOut` (its response carries only an id and a date, no
+ * author or text), so it goes through this instead - a comment date is
+ * never formatted outside this module.
+ */
+export function formatCommentDate(date: string | number, timezone: string): string {
+  return formatDate(Number(date), timezone)
 }
 
 /**
