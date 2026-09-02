@@ -126,9 +126,11 @@ export const readDocTool: ToolDefinition<typeof readDocInputShape, typeof readDo
       name: out.name ?? '',
       content: out.content,
     })
+    // No `droppedItems`: a doc page is one item, and the cut falls inside
+    // it. Claiming a dropped-item count here would be a number this code
+    // cannot know.
     return truncateResponse(rendered, {
       maxChars: ctx.maxResponseChars,
-      itemCount: 1,
       retryHint: TRUNCATION_RETRY_HINT,
     })
   },

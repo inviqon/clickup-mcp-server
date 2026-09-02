@@ -50,13 +50,13 @@ describe('paginate', () => {
 
 describe('truncateResponse', () => {
   it('returns the text unchanged when within budget', () => {
-    expect(truncateResponse('short', { maxChars: 100, itemCount: 1, retryHint: 'x' })).toBe('short')
+    expect(truncateResponse('short', { maxChars: 100, retryHint: 'x' })).toBe('short')
   })
 
   it('announces truncation and names the way to get the rest', () => {
     const input = 'x'.repeat(200)
     const out = truncateResponse(input, {
-      maxChars: 100, itemCount: 20, retryHint: "use offset=10 or narrow with 'statuses'",
+      maxChars: 100, retryHint: "use offset=10 or narrow with 'statuses'",
     })
     expect(out.length).toBeLessThanOrEqual(100 + 200)
     expect(out).toContain('Response truncated')
@@ -64,6 +64,20 @@ describe('truncateResponse', () => {
     // The above bound alone would pass a notice-only implementation that
     // never actually shortens the body. Pin that truncation really happened.
     expect(out.length).toBeLessThan(input.length)
+  })
+
+  // The notice used to read "showing a partial result of N item(s)" with N
+  // as the TOTAL count, which an agent reads as "N items are here".
+  it('names how many items were dropped, never the total', () => {
+    const out = truncateResponse('x'.repeat(500), {
+      maxChars: 100, droppedItems: 17, retryHint: 'offset=8',
+    })
+    expect(out).toContain('17 item(s) not shown')
+  })
+
+  it('claims no item count when it does not know one', () => {
+    const out = truncateResponse('x'.repeat(500), { maxChars: 100, retryHint: 'offset=8' })
+    expect(out).not.toMatch(/item\(s\)/)
   })
 })
 

@@ -237,9 +237,15 @@ Token efficiency comes mostly from response shaping, not from tool count.
 - Pagination is uniform: `total`, `count`, `offset`, `has_more`, `next_offset`.
   Default limit 25, maximum 100 (the ClickUp page ceiling).
 - A character budget (`CHARACTER_LIMIT`, set from `CLICKUP_MAX_RESPONSE_CHARS`,
-  default 40000) is enforced per response. Exceeding it truncates and appends a
-  notice naming the number of dropped items and the parameter that would
-  retrieve them.
+  default 40000) is enforced on the RENDERED TEXT of each response. Exceeding
+  it drops whole items from the end and appends a notice naming the number of
+  dropped items and the parameter that would retrieve them. A response with no
+  item list is cut by character instead, and its notice claims no count.
+  `structuredContent` is deliberately NOT truncated: cutting it would produce a
+  payload that violates the tool's own `outputSchema`, which is a worse
+  outcome than a large one. A client reading `structuredContent` therefore
+  receives the full result, and the budget bounds only what the text view
+  costs in tokens.
 - Write tools return the entity as ClickUp reports it after the write, never an
   echo of the input.
 
@@ -311,8 +317,10 @@ reported inside the result object with `isError: true`, not as protocol errors.
 Vitest plus MSW. Three layers:
 
 - Unit: date parsing, formatters, rate limiter, cache, mode and category
-  filtering, error mapping. 100% coverage on `format/`, `core/dates.ts` and
-  `core/errors.ts`.
+  filtering, error mapping. `format/`, `core/dates.ts` and `core/errors.ts`
+  are the most heavily covered modules; the earlier claim of 100% coverage on
+  them was never true and is not a gate. The enforced floor is the aggregate
+  one below.
 - Integration: every tool handler against MSW-mocked ClickUp endpoints, using
   fixtures captured from real response shapes. Covers success, empty result,
   404, 429 with retry, and malformed response for each tool.

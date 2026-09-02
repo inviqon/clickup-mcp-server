@@ -56,8 +56,33 @@ export function paginate<T>(items: T[], opts: PaginateOptions): Page<T> {
 
 export type TruncateOptions = {
   maxChars: number
-  itemCount: number
+  /**
+   * How many items were left out. Omitted when the response is not a list
+   * of items, or when the cut fell inside one - in which case the notice
+   * says the response was truncated without claiming a count it cannot
+   * know. It must never be the TOTAL item count: the notice used to read
+   * "showing a partial result of N item(s)" with N as the total, which an
+   * agent reads as "N items are here".
+   */
+  droppedItems?: number | undefined
+  /**
+   * What the caller should do to retrieve the rest, naming the parameter -
+   * `offset`, `limit` - rather than a vague suggestion, per spec section 6.
+   */
   retryHint: string
+}
+
+/**
+ * The notice appended to any truncated response. Exported so a caller that
+ * fits whole items into the budget (src/server.ts) can size the body around
+ * the exact notice it will append, rather than guessing at its length.
+ */
+export function truncationNotice(opts: { droppedItems?: number | undefined; retryHint: string }): string {
+  const dropped =
+    opts.droppedItems !== undefined && opts.droppedItems > 0
+      ? `${opts.droppedItems} item(s) not shown. `
+      : ''
+  return `\n\n[Response truncated to the character budget. ${dropped}${opts.retryHint}]`
 }
 
 /**
@@ -69,7 +94,7 @@ export function truncateResponse(text: string, opts: TruncateOptions): string {
   if (text.length <= opts.maxChars) {
     return text
   }
-  const notice = `\n\n[Response truncated: showing a partial result of ${opts.itemCount} item(s). ${opts.retryHint}]`
+  const notice = truncationNotice(opts)
   const budgetForBody = Math.max(0, opts.maxChars - notice.length)
   return text.slice(0, budgetForBody) + notice
 }

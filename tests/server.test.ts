@@ -124,6 +124,25 @@ describe('buildServer - truncation and mode-scoped response_format', () => {
     return client
   }
 
+  const paged = {
+    ...echo,
+    name: 'clickup_paged',
+    outputSchema: {
+      total: z.number(), count: z.number(), offset: z.number(),
+      items: z.array(z.object({ id: z.string() })), has_more: z.boolean(),
+      next_offset: z.number().optional(),
+    },
+    handler: async () => ({
+      total: 40,
+      count: 40,
+      offset: 0,
+      items: Array.from({ length: 40 }, (_, i) => ({ id: `item-${i}` })),
+      has_more: false,
+    }),
+    render: (o: { count: number; total: number; items: Array<{ id: string }> }) =>
+      [`Showing ${o.count} of ${o.total}`, ...o.items.map((i) => `- ${i.id}`)].join('\n'),
+  } as unknown as AnyToolDefinition
+
   it('truncates content over the configured character budget with a visible notice', async () => {
     const client = await connectWithEnv([big], { CLICKUP_MAX_RESPONSE_CHARS: '100' })
     const res = await client.callTool({ name: 'clickup_big', arguments: { value: 'x' } })
@@ -131,6 +150,34 @@ describe('buildServer - truncation and mode-scoped response_format', () => {
     // The untruncated body would be "Echo: " followed by 500 x's (506 chars).
     expect(text.length).toBeLessThan(506)
     expect(text).toContain('Response truncated')
+  })
+
+  // The notice used to name the TOTAL item count ("showing a partial result
+  // of 40 item(s)"), which an agent reads as "40 items are here". Spec
+  // section 6 requires the number DROPPED plus the parameter that retrieves
+  // them.
+  it('names how many items were dropped and the offset that would fetch them', async () => {
+    const client = await connectWithEnv([paged], { CLICKUP_MAX_RESPONSE_CHARS: '200' })
+    const res = await client.callTool({ name: 'clickup_paged', arguments: { value: 'x' } })
+    const text = (res.content as Array<{ text: string }>)[0]!.text
+    const shown = [...text.matchAll(/^- item-\d+$/gm)].length
+    expect(shown).toBeGreaterThan(0)
+    expect(shown).toBeLessThan(40)
+    expect(text).toContain(`${40 - shown} item(s) not shown`)
+    expect(text).toContain(`offset=${shown}`)
+    // The rendered header must agree with what is actually listed rather
+    // than still claiming the full page.
+    expect(text).toContain(`Showing ${shown} of 40`)
+    expect(text.length).toBeLessThanOrEqual(200)
+  })
+
+  it('sends the full result as structuredContent even when the text is truncated', async () => {
+    const client = await connectWithEnv([paged], { CLICKUP_MAX_RESPONSE_CHARS: '200' })
+    const res = await client.callTool({ name: 'clickup_paged', arguments: { value: 'x' } })
+    // Ruled deliberately: truncating structuredContent would produce a
+    // payload violating the tool's own outputSchema. The budget bounds the
+    // rendered text only.
+    expect((res.structuredContent as { items: unknown[] }).items).toHaveLength(40)
   })
 
   it('does not advertise response_format on a write mode tool, and a read tool still does', async () => {

@@ -10,24 +10,102 @@ import {
   selectTools,
   type AnyToolDefinition,
 } from './core/registry.js'
-import { truncateResponse } from './format/common.js'
+import { truncateResponse, truncationNotice } from './format/common.js'
 
 /**
- * A generic, tool-shape-agnostic estimate of how many "items" a response
- * carries, used only to phrase the wrapper-level truncation notice. Most
- * tool output is either a bare array or a `paginate()`-shaped `{ items }`
- * object; anything else counts as one item so the notice still reads
- * sensibly rather than claiming a precise count it cannot know.
+ * The list of items a response carries, when it carries one: either a bare
+ * array or a `paginate()`-shaped `{ items }` object. `undefined` for
+ * anything else - a single task, a doc page - where there is no item
+ * granularity to truncate at and no dropped-item count to report.
  */
-function estimateItemCount(out: unknown): number {
-  if (Array.isArray(out)) return out.length
+function itemsOf(out: unknown): unknown[] | undefined {
+  if (Array.isArray(out)) return out
   if (out !== null && typeof out === 'object' && Array.isArray((out as { items?: unknown }).items)) {
-    return (out as { items: unknown[] }).items.length
+    return (out as { items: unknown[] }).items
   }
-  return 1
+  return undefined
+}
+
+/**
+ * The same response with only the first `kept` items, and the pagination
+ * fields corrected to match. Correcting them is the point: a rendered
+ * header reading "Showing 25 of 100" above 12 listed items would be a
+ * placeholder-grade lie, the exact class of defect reliability rule 2
+ * forbids.
+ */
+function withItems(out: unknown, all: unknown[], kept: unknown[]): unknown {
+  if (Array.isArray(out)) return kept
+  const base = out as unknown as Record<string, unknown>
+  const next: Record<string, unknown> = { ...base, items: kept }
+  if (typeof base.count === 'number') {
+    next.count = kept.length
+  }
+  if (kept.length < all.length) {
+    if (typeof base.has_more === 'boolean') {
+      next.has_more = true
+    }
+    if (typeof base.offset === 'number') {
+      next.next_offset = base.offset + kept.length
+    }
+  }
+  return next
+}
+
+function pagedRetryHint(out: unknown, kept: number): string {
+  const offset = out !== null && typeof out === 'object' && typeof (out as { offset?: unknown }).offset === 'number'
+    ? (out as { offset: number }).offset
+    : 0
+  return `Request the rest with offset=${offset + kept}, or pass a smaller limit so each response fits the budget.`
 }
 
 const GENERIC_RETRY_HINT = 'Narrow the request (add filters, request a smaller page, or fewer fields) and retry.'
+
+/**
+ * Renders `out` and, when the render exceeds the budget, drops WHOLE items
+ * from the end until it fits - so the notice can name exactly how many were
+ * dropped and the offset that would fetch them, per spec section 6.
+ *
+ * Dropping items rather than characters is what makes the count honest. A
+ * blind character cut knows only the total item count, which is why the
+ * notice used to name the total and read to an agent as "N items are here".
+ * A response with no item list (a single task, a doc page) still falls back
+ * to a character cut, with a notice that claims no count at all.
+ */
+export function fitToBudget(out: unknown, renderOne: (value: unknown) => string, maxChars: number): string {
+  const full = renderOne(out)
+  if (full.length <= maxChars) {
+    return full
+  }
+
+  const items = itemsOf(out)
+  if (items === undefined || items.length === 0) {
+    return truncateResponse(full, { maxChars, retryHint: GENERIC_RETRY_HINT })
+  }
+
+  // Largest prefix of items whose render plus its own notice fits.
+  let lo = 0
+  let hi = items.length - 1
+  let best: string | undefined
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    const kept = items.slice(0, mid)
+    const body = renderOne(withItems(out, items, kept))
+    const notice = truncationNotice({
+      droppedItems: items.length - mid,
+      retryHint: pagedRetryHint(out, mid),
+    })
+    if (body.length + notice.length <= maxChars) {
+      best = body + notice
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
+  }
+
+  // Even zero items did not fit (a budget smaller than the envelope
+  // itself). Fall back to the character cut rather than returning nothing.
+  return best ?? truncateResponse(full, { maxChars, retryHint: pagedRetryHint(out, 0) })
+}
 
 /**
  * Wraps one `AnyToolDefinition` into the callback shape `McpServer.registerTool`
@@ -61,13 +139,21 @@ function makeWrapper(tool: AnyToolDefinition, config: ServerConfig, contextFacto
     try {
       const ctx = contextFactory()
       const out = await tool.handler(parsed.data, ctx)
-      const rendered = format === 'json' ? JSON.stringify(out, null, 2) : tool.render(out, ctx)
-      const text = truncateResponse(rendered, {
-        maxChars: config.maxResponseChars,
-        itemCount: estimateItemCount(out),
-        retryHint: GENERIC_RETRY_HINT,
-      })
+      // `value` is `unknown` because `fitToBudget` hands back a shallow
+      // copy of the same shape with a shorter `items`; the cast is the same
+      // type erasure `AnyToolDefinition` already applies to `render`.
+      const renderOne = (value: unknown): string =>
+        format === 'json'
+          ? JSON.stringify(value, null, 2)
+          : tool.render(value as Parameters<typeof tool.render>[0], ctx)
+      const text = fitToBudget(out, renderOne, config.maxResponseChars)
       return {
+        // Deliberately the FULL result, never the truncated view: cutting
+        // structured content would produce a payload that violates the
+        // tool's own outputSchema, which is worse than a large one. The
+        // character budget bounds the rendered text; a client reading
+        // structuredContent gets everything. Documented in the README and
+        // spec section 6.
         structuredContent: out,
         content: [{ type: 'text', text }],
       }
