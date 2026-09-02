@@ -400,3 +400,50 @@ export const GetSpaceTagsResponseSchema = z
     tags: z.array(SpaceTagSchema),
   })
   .passthrough()
+
+/**
+ * Structure-domain schemas (Task 13): space, folder and list, as returned
+ * by ClickUp's create/update/get endpoints for each
+ * (developer.clickup.com's "Create Space"/"Update Space"/"Get Space",
+ * "Create Folder"/"Update Folder"/"Get Folder", "Create Folderless List"/
+ * "Create List"/"Update List" reference pages). Deliberately narrower than
+ * the full response ClickUp sends (which also carries `statuses`,
+ * `features`, `multiple_assignees`, ...): only the fields this server's
+ * structure tools actually read or return are declared, per the same
+ * reasoning `TaskSummarySchema` is narrower than `TaskDetailSchema`.
+ */
+export const SpaceDetailSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    private: z.boolean().optional(),
+  })
+  .passthrough()
+
+export type SpaceDetail = z.infer<typeof SpaceDetailSchema>
+
+export const FolderDetailSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+  })
+  .passthrough()
+
+export type FolderDetail = z.infer<typeof FolderDetailSchema>
+
+/**
+ * `content` and `due_date` are both nullable/absent on ClickUp's own list
+ * response (a list created without either reports them as `null` or an
+ * empty string) - declared optional and nullable per reliability rule 2,
+ * never defaulted.
+ */
+export const ListWriteResponseSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    content: z.string().nullable().optional(),
+    due_date: z.string().nullable().optional(),
+  })
+  .passthrough()
+
+export type ListWriteResponse = z.infer<typeof ListWriteResponseSchema>
