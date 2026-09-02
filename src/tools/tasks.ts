@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { AnyToolDefinition, ToolDefinition } from '../core/registry.js'
+import type { ClickUpContext } from '../core/context.js'
 import { parseDuration, resolveDate } from '../core/dates.js'
 import { toAgentMessage } from '../core/errors.js'
 import { loadListMeta } from '../clickup/endpoints/workspace.js'
@@ -20,8 +21,9 @@ import {
   updateTaskRaw,
   type MoveTaskBody,
 } from '../clickup/endpoints/tasks.js'
-import { TaskSummarySchema } from '../clickup/schemas.js'
+import { TaskSummarySchema, type TaskDetail } from '../clickup/schemas.js'
 import { nameWithId, omitEmpty, paginate } from '../format/common.js'
+import { boundPage } from '../clickup/pagination.js'
 import { renderBulkUpdateResult, renderTask } from '../format/task.js'
 
 const PRIORITY_TO_INT: Record<'urgent' | 'high' | 'normal' | 'low', number> = {
@@ -32,6 +34,47 @@ const PRIORITY_TO_INT: Record<'urgent' | 'high' | 'normal' | 'low', number> = {
 }
 
 const customFieldsInputSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+
+/**
+ * ClickUp assignees are integer user ids; this server's own input schema
+ * carries them as strings (consistent with every other id in this server's
+ * tools). `Number("abc")` does not throw - it silently produces `NaN`,
+ * which then serialises to JSON `null` and would send a request that
+ * silently assigns nobody instead of the id the agent meant. Guarded here
+ * so a bad id is a loud, actionable error instead of a wrong assignee no
+ * one notices.
+ */
+function toAssigneeId(id: string): number {
+  const n = Number(id)
+  if (Number.isNaN(n)) {
+    throw new Error(
+      `Assignee id "${id}" is not a valid ClickUp user id (expected a number, as a string). ` +
+        'Use clickup_resolve_member to find the correct id rather than guessing one.',
+    )
+  }
+  return n
+}
+
+/**
+ * Re-reads a task after a write whose own response does not carry the
+ * task's full state (the v3 move endpoint, and both `clickup_link_tasks`
+ * relation kinds). If this re-read fails, the write itself already
+ * succeeded - ClickUp has already applied it - so this must never surface
+ * as an ordinary handler failure indistinguishable from "the write did not
+ * happen." The task id is included so the agent can look the task up
+ * directly instead of retrying the write blindly.
+ */
+async function refetchAfterWrite(ctx: ClickUpContext, taskId: string, whatSucceeded: string): Promise<TaskDetail> {
+  try {
+    return await getTaskDetail(ctx, taskId)
+  } catch (err) {
+    throw new Error(
+      `${whatSucceeded} succeeded, but reading task ${taskId} back afterward failed: ` +
+        `${toAgentMessage(err, { resource: 'task', id: taskId })} The write already happened in ClickUp - check ` +
+        `the task's current state (e.g. with clickup_get_task) before retrying, rather than assuming it failed.`,
+    )
+  }
+}
 
 /**
  * Shared by every tool that returns a whole task. `TaskSummarySchema`
@@ -57,6 +100,7 @@ const taskDetailOutputShape = {
   url: z.string(),
   subtasks: z.array(z.object({ id: z.string(), name: z.string(), status: z.string() })).optional(),
   comments: z.array(z.object({ id: z.string(), author: z.string(), text: z.string() })).optional(),
+  custom_field_errors: z.array(z.object({ field: z.string(), error: z.string() })).optional(),
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +167,13 @@ const listTasksOutputShape = {
   items: z.array(TaskSummarySchema),
   has_more: z.boolean(),
   next_offset: z.number().optional(),
+  /**
+   * Present only when the walk over upstream pages hit its hard cap before
+   * ClickUp confirmed the end (see `walkTaskPages`, src/clickup/pagination.ts).
+   * `total`/`count` above only describe what was actually fetched, not the
+   * true count matching the filter, whenever this is true.
+   */
+  bounded: z.boolean().optional(),
 }
 
 type ScopeInput = {
@@ -191,6 +242,12 @@ export const listTasksTool: ToolDefinition<typeof listTasksInputShape, typeof li
           'to find one, or clickup_search_tasks to search the whole workspace by text instead.',
       )
     }
+    if (listId !== undefined && spaceId !== undefined) {
+      throw new Error(
+        `clickup_list_tasks needs exactly one of list_id or space_id, not both. Got list_id "${listId}" and ` +
+          `space_id "${spaceId}". Drop whichever one you did not mean.`,
+      )
+    }
 
     const includeClosed = args.include_closed ?? false
     const includeSubtasks = args.include_subtasks ?? false
@@ -202,7 +259,7 @@ export const listTasksTool: ToolDefinition<typeof listTasksInputShape, typeof li
     const dueAfterMs =
       args.due_after !== undefined ? resolveDate(args.due_after, { timezone: ctx.timezone }).epochMs : undefined
 
-    const tasks = await listTasksRaw(ctx, {
+    const { tasks, hasMoreUpstream, truncated } = await listTasksRaw(ctx, {
       listId,
       spaceId,
       assignees: args.assignees,
@@ -212,9 +269,12 @@ export const listTasksTool: ToolDefinition<typeof listTasksInputShape, typeof li
       dueAfterMs,
       includeClosed,
       includeSubtasks,
+      minItems: offset + limit,
     })
 
-    const page = paginate(tasks.map(toTaskSummary), { offset, limit })
+    const page = boundPage(paginate(tasks.map((t) => toTaskSummary(t, ctx.timezone)), { offset, limit }), {
+      hasMoreUpstream,
+    })
     const scope = describeScope({
       listId,
       spaceId,
@@ -224,16 +284,26 @@ export const listTasksTool: ToolDefinition<typeof listTasksInputShape, typeof li
       dueBefore: args.due_before,
       dueAfter: args.due_after,
     })
-    return { scope, ...page }
+    return { scope, ...page, ...(truncated ? { bounded: true } : {}) }
   },
   render: (out) => {
     if (out.items.length === 0) {
-      return `No tasks found in ${out.scope}`
+      return out.bounded
+        ? `No tasks found in ${out.scope}, but the result is bounded to the first 5 upstream pages (500 tasks) - ` +
+            'the safety cap was hit before this could be confirmed as a true empty result. Narrow with more ' +
+            'specific filters (status, assignee, tags, due dates) to search a smaller pool and get a definitive answer.'
+        : `No tasks found in ${out.scope}`
     }
     return [
       `# Tasks in ${out.scope}`,
       '',
       `Showing ${out.count} of ${out.total}${out.has_more ? ' (more available, pass a higher offset)' : ''}`,
+      ...(out.bounded
+        ? [
+            'Result bounded to the first 5 upstream pages (500 tasks) before this filter could confirm the end; ' +
+              'narrow with more specific filters (status, assignee, tags, due dates) to see the rest.',
+          ]
+        : []),
       '',
       ...out.items.map(
         (t) => `- ${nameWithId(t.name, t.id)} [${t.status}]${t.due_date ? ` - due ${t.due_date}` : ''}`,
@@ -284,6 +354,7 @@ export const createTaskTool: ToolDefinition<typeof createTaskInputShape, typeof 
       assertValidStatus(meta, args.status)
     }
 
+    const customFieldNames = args.custom_fields !== undefined ? Object.keys(args.custom_fields) : []
     const resolvedFields =
       args.custom_fields !== undefined ? await resolveCustomFields(ctx, args.list_id, args.custom_fields) : []
 
@@ -291,7 +362,7 @@ export const createTaskTool: ToolDefinition<typeof createTaskInputShape, typeof 
       name: args.name,
       description: args.description,
       status: args.status,
-      assignees: args.assignees !== undefined ? args.assignees.map(Number) : undefined,
+      assignees: args.assignees !== undefined ? args.assignees.map(toAssigneeId) : undefined,
       tags: args.tags,
       priority: args.priority !== undefined ? PRIORITY_TO_INT[args.priority] : undefined,
       due_date: args.due_date !== undefined ? resolveDate(args.due_date, { timezone: ctx.timezone }).epochMs : undefined,
@@ -303,11 +374,38 @@ export const createTaskTool: ToolDefinition<typeof createTaskInputShape, typeof 
 
     const created = await createTaskRaw(ctx, args.list_id, body)
 
-    if (resolvedFields.length > 0) {
-      await Promise.all(resolvedFields.map((f) => setCustomFieldValue(ctx, created.id, f.id, f.value)))
+    if (resolvedFields.length === 0) {
+      return toTaskOut(created, ctx)
     }
 
-    return toTaskOut(created, ctx)
+    // The task already exists at this point. A custom-field write failing
+    // here (rate limit, network blip - name validation already happened in
+    // resolveCustomFields) must never make the caller lose the task id: a
+    // thrown error here would look identical to "nothing was created" and
+    // invite a retry that creates a duplicate. Every field write is
+    // attempted independently and reported back, in the spirit of bulk
+    // update's succeeded/failed split.
+    const fieldResults = await Promise.allSettled(
+      resolvedFields.map((f) => setCustomFieldValue(ctx, created.id, f.id, f.value)),
+    )
+    const customFieldErrors: Array<{ field: string; error: string }> = []
+    fieldResults.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        customFieldErrors.push({
+          field: customFieldNames[index] as string,
+          error: toAgentMessage(result.reason, { resource: 'custom field', id: customFieldNames[index] as string }),
+        })
+      }
+    })
+
+    // Re-read the task so the returned custom_fields reflect what was
+    // actually written, not the pre-field-write snapshot from `created`.
+    const refetched = await getTaskDetail(ctx, created.id)
+    const out = toTaskOut(refetched, ctx)
+    if (customFieldErrors.length > 0) {
+      out.custom_field_errors = customFieldErrors
+    }
+    return out
   },
   render: (out) => renderTask(out),
 }
@@ -364,6 +462,7 @@ export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof 
       assertValidStatus(meta, args.status)
     }
 
+    const customFieldNames = args.custom_fields !== undefined ? Object.keys(args.custom_fields) : []
     const resolvedFields =
       args.custom_fields !== undefined ? await resolveCustomFields(ctx, listId, args.custom_fields) : []
 
@@ -379,7 +478,7 @@ export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof 
       name: args.name,
       description,
       status: args.status,
-      assignees: args.assignees !== undefined ? { add: args.assignees.map(Number) } : undefined,
+      assignees: args.assignees !== undefined ? { add: args.assignees.map(toAssigneeId) } : undefined,
       tags: args.tags,
       priority: args.priority !== undefined ? PRIORITY_TO_INT[args.priority] : undefined,
       due_date: args.due_date !== undefined ? resolveDate(args.due_date, { timezone: ctx.timezone }).epochMs : undefined,
@@ -391,11 +490,32 @@ export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof 
 
     const updated = await updateTaskRaw(ctx, args.task_id, body)
 
-    if (resolvedFields.length > 0) {
-      await Promise.all(resolvedFields.map((f) => setCustomFieldValue(ctx, args.task_id, f.id, f.value)))
+    if (resolvedFields.length === 0) {
+      return toTaskOut(updated, ctx)
     }
 
-    return toTaskOut(updated, ctx)
+    // Same reasoning as clickup_create_task: the update already happened,
+    // so a custom-field write failure here must not make the task's id
+    // and other real changes disappear behind a thrown error.
+    const fieldResults = await Promise.allSettled(
+      resolvedFields.map((f) => setCustomFieldValue(ctx, args.task_id, f.id, f.value)),
+    )
+    const customFieldErrors: Array<{ field: string; error: string }> = []
+    fieldResults.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        customFieldErrors.push({
+          field: customFieldNames[index] as string,
+          error: toAgentMessage(result.reason, { resource: 'custom field', id: customFieldNames[index] as string }),
+        })
+      }
+    })
+
+    const refetched = await getTaskDetail(ctx, args.task_id)
+    const out = toTaskOut(refetched, ctx)
+    if (customFieldErrors.length > 0) {
+      out.custom_field_errors = customFieldErrors
+    }
+    return out
   },
   render: (out) => renderTask(out),
 }
@@ -435,7 +555,7 @@ export const updateTasksBulkTool: ToolDefinition<typeof bulkUpdateInputShape, ty
   handler: async (args, ctx) => {
     const body = omitEmpty({
       status: args.status,
-      assignees: args.assignees !== undefined ? { add: args.assignees.map(Number) } : undefined,
+      assignees: args.assignees !== undefined ? { add: args.assignees.map(toAssigneeId) } : undefined,
       priority: args.priority !== undefined ? PRIORITY_TO_INT[args.priority] : undefined,
       due_date: args.due_date !== undefined ? resolveDate(args.due_date, { timezone: ctx.timezone }).epochMs : undefined,
     })
@@ -449,7 +569,7 @@ export const updateTasksBulkTool: ToolDefinition<typeof bulkUpdateInputShape, ty
       if (result.status === 'fulfilled') {
         succeeded.push(taskId)
       } else {
-        failed.push({ task_id: taskId, error: toAgentMessage(result.reason) })
+        failed.push({ task_id: taskId, error: toAgentMessage(result.reason, { resource: 'task', id: taskId }) })
       }
     })
 
@@ -533,7 +653,7 @@ export const moveTaskTool: ToolDefinition<typeof moveTaskInputShape, typeof task
       ...(statusMappings !== undefined ? { status_mappings: statusMappings } : {}),
     })
 
-    const moved = await getTaskDetail(ctx, args.task_id)
+    const moved = await refetchAfterWrite(ctx, args.task_id, `Moving the task to list ${args.list_id}`)
     return toTaskOut(moved, ctx)
   },
   render: (out) => renderTask(out),
@@ -614,7 +734,13 @@ export const linkTasksTool: ToolDefinition<typeof linkTasksInputShape, typeof li
       await addDependency(ctx, args.task_id, { depends_on: args.other_task_id })
     }
 
-    const refetched = await getTaskDetail(ctx, args.task_id)
+    const whatSucceeded =
+      relation === 'link'
+        ? `Linking task ${args.task_id} to ${args.other_task_id}`
+        : relation === 'blocks'
+          ? `Making task ${args.task_id} block ${args.other_task_id}`
+          : `Making task ${args.task_id} blocked by ${args.other_task_id}`
+    const refetched = await refetchAfterWrite(ctx, args.task_id, whatSucceeded)
     return { relation, other_task_id: args.other_task_id, ...toTaskOut(refetched, ctx) }
   },
   render: (out) => {

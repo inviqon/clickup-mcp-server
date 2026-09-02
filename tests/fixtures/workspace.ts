@@ -298,3 +298,64 @@ export function searchHandlers(opts: { empty?: boolean } = {}) {
     ),
   ]
 }
+
+function pageFromRequest(request: Request): number {
+  return Number(new URL(request.url).searchParams.get('page') ?? '0')
+}
+
+function fillerTask(id: string) {
+  return {
+    id,
+    name: `Filler ${id}`,
+    text_content: '',
+    description: '',
+    status: { status: 'open', color: '#d3d3d3', orderindex: 0, type: 'open' },
+    date_created: '1567780450202',
+    due_date: null,
+    url: `https://app.clickup.com/t/${id}`,
+    list: { id: FOLDERLESS_LIST_ID, name: 'Backlog', access: true },
+  }
+}
+
+/**
+ * `GET /v2/team/{teamId}/task` (the endpoint behind `getWorkspaceTasks`,
+ * consumed by `clickup_search_tasks`) has no `last_page` field on its own
+ * response, unlike the list-scoped "get tasks" endpoint - so this models
+ * the walker's short-page heuristic specifically: page 0 returns a full,
+ * non-matching 100-task page, page 1 returns a short page (<100) that
+ * includes the one task actually matching `query: "target"`. A search that
+ * only ever fetched page 0 (the pre-fix behaviour) would never see it.
+ */
+export function pagedSearchHandlers() {
+  return [
+    http.get(`${API}/v2/team/${TEAM_ID}/task`, ({ request }) => {
+      const page = pageFromRequest(request)
+      if (page === 0) {
+        const tasks = Array.from({ length: 100 }, (_, i) => fillerTask(`f0-${i}`))
+        return HttpResponse.json({ tasks })
+      }
+      const tasks = [
+        { ...fillerTask('target-1'), name: 'Reachable only on page two: target' },
+        ...Array.from({ length: 4 }, (_, i) => fillerTask(`f1-${i}`)),
+      ]
+      return HttpResponse.json({ tasks })
+    }),
+  ]
+}
+
+/**
+ * An unbounded supply of full, non-matching 100-task pages, so the walk
+ * must be stopped by `walkTaskPages`'s 5-page cap rather than a confirmed
+ * end - `clickup_search_tasks` must disclose this (`bounded: true`) rather
+ * than silently reporting "no matches" as if the whole workspace had been
+ * searched.
+ */
+export function unboundedSearchHandlers() {
+  return [
+    http.get(`${API}/v2/team/${TEAM_ID}/task`, ({ request }) => {
+      const page = pageFromRequest(request)
+      const tasks = Array.from({ length: 100 }, (_, i) => fillerTask(`u${page}-${i}`))
+      return HttpResponse.json({ tasks })
+    }),
+  ]
+}

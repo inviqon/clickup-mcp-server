@@ -56,6 +56,14 @@ export function renderTask(out: TaskOut): string {
     }
   }
 
+  if (out.custom_field_errors && out.custom_field_errors.length > 0) {
+    lines.push(
+      '',
+      '**Warning: the task was saved, but some custom fields could not be set**',
+      ...out.custom_field_errors.map((e) => `- ${e.field}: ${e.error}`),
+    )
+  }
+
   lines.push('', out.url)
   return lines.join('\n')
 }

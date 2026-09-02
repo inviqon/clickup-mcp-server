@@ -188,9 +188,17 @@ export const TaskSchema = z
 
 export type Task = z.infer<typeof TaskSchema>
 
+/**
+ * `last_page` is only ever present on the list-scoped "get tasks" response
+ * (`GET /v2/list/{list_id}/task`); the team-scoped "get filtered team
+ * tasks" response never reports it. Declared optional here, shared by both
+ * callers, so `walkTaskPages` (src/clickup/pagination.ts) can read it when
+ * present and fall back to its short-page heuristic when it is not.
+ */
 export const GetTasksResponseSchema = z
   .object({
     tasks: z.array(TaskSchema),
+    last_page: z.boolean().optional(),
   })
   .passthrough()
 

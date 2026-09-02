@@ -244,4 +244,22 @@ describe('clickup_search_tasks', () => {
     const out = await tool('clickup_search_tasks').handler({ query: 'login' }, testContext())
     expect(out.items.map((t: { id: string }) => t.id).sort()).toEqual(['9hx', '9hy'])
   })
+
+  it('walks a second upstream page rather than only ever considering the first 100 candidate tasks (Finding 3)', async () => {
+    mswServer.use(...fx.pagedSearchHandlers())
+    const out = await tool('clickup_search_tasks').handler({ query: 'target' }, testContext())
+    // The one task matching "target" only exists on upstream page two - a
+    // single-page fetch (the pre-fix behaviour) would report zero matches.
+    expect(out.items.map((t: { id: string }) => t.id)).toEqual(['target-1'])
+    expect(out.bounded).toBeUndefined()
+  })
+
+  it('discloses a bounded result honestly when the 5-page cap is hit before the end is confirmed (Finding 3)', async () => {
+    mswServer.use(...fx.unboundedSearchHandlers())
+    const out = await tool('clickup_search_tasks').handler({ query: 'nonexistent-query' }, testContext())
+    expect(out.bounded).toBe(true)
+    const md = tool('clickup_search_tasks').render(out, testContext())
+    expect(md).toContain('bounded')
+    expect(md).toContain('space_id or list_id')
+  })
 })

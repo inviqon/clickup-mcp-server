@@ -263,7 +263,10 @@ export function createdTask(overrides: { due_date?: number | null; name?: string
  * POST /v2/task/:taskId/field/:fieldId, which records the path it was
  * called with into `seen` rather than asserting on it directly - so the
  * test can prove the custom field write happened as a second call against
- * the newly created task's id, not the list's.
+ * the newly created task's id, not the list's. Also backs the re-fetch
+ * `clickup_create_task` does after writing custom fields (GET /v2/task/86new)
+ * with the field populated, so the tool's returned view reflects the write
+ * rather than the pre-write creation response.
  */
 export function createWithFieldHandlers(seen: string[]) {
   return [
@@ -272,6 +275,39 @@ export function createWithFieldHandlers(seen: string[]) {
       seen.push(new URL(request.url).pathname.replace(/^\/api/, ''))
       return HttpResponse.json({})
     }),
+    http.get(`${API}/v2/task/86new`, () =>
+      HttpResponse.json({
+        ...createdTask(),
+        custom_fields: [
+          {
+            id: 'cf-1',
+            name: 'Client',
+            type: 'short_text',
+            type_config: {},
+            date_created: '1621915186877',
+            hide_from_guests: false,
+            value: 'Selectry',
+          },
+        ],
+      }),
+    ),
+  ]
+}
+
+/**
+ * Like `createWithFieldHandlers`, but the custom-field write itself fails
+ * (a 500), so the created task exists but the field write does not take -
+ * exercising `clickup_create_task`'s partial-success path (the task id
+ * must still come back, alongside a `custom_field_errors` entry naming the
+ * field).
+ */
+export function createWithFailingFieldHandlers() {
+  return [
+    http.post(`${API}/v2/list/${LIST_ID}/task`, () => HttpResponse.json(createdTask())),
+    http.post(`${API}/v2/task/86new/field/cf-1`, () =>
+      HttpResponse.json({ err: 'Field write failed', ECODE: 'FIELD_001' }, { status: 500 }),
+    ),
+    http.get(`${API}/v2/task/86new`, () => HttpResponse.json(createdTask())),
   ]
 }
 
@@ -291,6 +327,44 @@ export function updateHandler(onBody: (body: Record<string, unknown>) => void, o
       onBody(body)
       return HttpResponse.json({ ...baseTask(), ...overrides })
     }),
+  ]
+}
+
+/**
+ * PUT /v2/task/86abc plus POST /v2/task/86abc/field/cf-1, backing
+ * `clickup_update_task`'s custom-field re-fetch path. GET /v2/task/86abc
+ * (called both before the write, for the append-description base text,
+ * and again afterward, to build the returned view) reports the field as
+ * already populated unless `opts.failing`, in which case the field write
+ * itself fails and the refetched task still shows no value for it.
+ */
+export function updateWithFieldHandlers(opts: { failing?: boolean } = {}) {
+  return [
+    http.put(`${API}/v2/task/${TASK_ID}`, () => HttpResponse.json(baseTask())),
+    http.post(`${API}/v2/task/${TASK_ID}/field/cf-1`, () => {
+      if (opts.failing) {
+        return HttpResponse.json({ err: 'Field write failed', ECODE: 'FIELD_001' }, { status: 500 })
+      }
+      return HttpResponse.json({})
+    }),
+    http.get(`${API}/v2/task/${TASK_ID}`, () =>
+      HttpResponse.json({
+        ...baseTask(),
+        custom_fields: opts.failing
+          ? []
+          : [
+              {
+                id: 'cf-1',
+                name: 'Client',
+                type: 'short_text',
+                type_config: {},
+                date_created: '1621915186877',
+                hide_from_guests: false,
+                value: 'Selectry',
+              },
+            ],
+      }),
+    ),
   ]
 }
 
@@ -348,10 +422,91 @@ export function listTasksHandlers(opts: { empty?: boolean } = {}) {
   ]
 }
 
+function pageTaskFixture(id: string) {
+  return {
+    id,
+    name: `Task ${id}`,
+    status: { status: 'open', color: '#d3d3d3', orderindex: 0, type: 'open' },
+    due_date: null,
+    url: `https://app.clickup.com/t/${id}`,
+    list: { id: LIST_ID, name: 'Sprint 1', access: true },
+  }
+}
+
+function pageFromRequest(request: Request): number {
+  return Number(new URL(request.url).searchParams.get('page') ?? '0')
+}
+
+/**
+ * GET /v2/list/100/task backed by two upstream pages: page 0 returns a
+ * full 100-task page (`last_page: false`), page 1 returns 50 (`last_page:
+ * true`) - 150 tasks in total, none of which fit in one upstream page.
+ * Exercises `walkTaskPages` actually walking past page 0 rather than
+ * treating it as the whole result.
+ */
+export function twoPageListTasksHandlers() {
+  return [
+    http.get(`${API}/v2/list/${LIST_ID}/task`, ({ request }) => {
+      const page = pageFromRequest(request)
+      const count = page === 0 ? 100 : 50
+      const tasks = Array.from({ length: count }, (_, i) => pageTaskFixture(`p${page}-${i}`))
+      return HttpResponse.json({ tasks, last_page: page >= 1 })
+    }),
+  ]
+}
+
+/**
+ * GET /v2/list/100/task backed by an unbounded supply of full 100-task
+ * pages that never report `last_page: true` - modelling a list large
+ * enough that `walkTaskPages`'s 5-page safety cap is what stops the walk,
+ * not the list actually ending.
+ */
+export function unboundedListTasksHandlers() {
+  return [
+    http.get(`${API}/v2/list/${LIST_ID}/task`, ({ request }) => {
+      const page = pageFromRequest(request)
+      const tasks = Array.from({ length: 100 }, (_, i) => pageTaskFixture(`p${page}-${i}`))
+      return HttpResponse.json({ tasks, last_page: false })
+    }),
+  ]
+}
+
 // -- Delete task fixtures -------------------------------------------------------
 
 export function deleteHandlers() {
   return [http.delete(`${API}/v2/task/${TASK_ID}`, () => new HttpResponse(null, { status: 204 }))]
+}
+
+// -- Confirmation-read-failure fixtures (write succeeded, re-fetch did not) ---
+
+/**
+ * GET /v2/task/86abc succeeds on its first call (the pre-move status
+ * check) and fails on every call after that (the post-move confirmation
+ * read) - modelling a move that genuinely happened in ClickUp while the
+ * read-back that would confirm it to the agent failed (a transient error,
+ * not a validation failure).
+ */
+export function moveSucceedsThenRefetchFailsHandlers() {
+  let calls = 0
+  return [
+    http.get(`${API}/v2/task/${TASK_ID}`, () => {
+      calls += 1
+      if (calls === 1) {
+        return HttpResponse.json(baseTask())
+      }
+      return HttpResponse.json({ err: 'Server error', ECODE: 'SRV_001' }, { status: 500 })
+    }),
+  ]
+}
+
+/**
+ * The link/dependency write succeeds, but the confirmation GET
+ * /v2/task/86abc that `clickup_link_tasks` performs afterward fails
+ * outright - unlike the move case, linking has no earlier successful GET
+ * to this path, so a single always-failing handler is enough.
+ */
+export function linkRefetchFailsHandlers() {
+  return [http.get(`${API}/v2/task/${TASK_ID}`, () => HttpResponse.json({ err: 'Server error' }, { status: 500 }))]
 }
 
 // -- Link / dependency fixtures --------------------------------------------------

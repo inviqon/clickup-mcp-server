@@ -1,4 +1,5 @@
 import type { ClickUpContext } from '../../core/context.js'
+import { walkTaskPages } from '../pagination.js'
 import {
   AuthorizedUserSchema,
   GetCustomFieldsResponseSchema,
@@ -105,24 +106,55 @@ export type WorkspaceTaskFilter = {
   includeClosed?: boolean | undefined
 }
 
+export type WorkspaceTasksResult = {
+  tasks: Task[]
+  /**
+   * True when more tasks may exist upstream than `tasks` holds - see
+   * `walkTaskPages` (src/clickup/pagination.ts). `clickup_search_tasks`
+   * must not report an exact total, and must force `has_more`, when this
+   * is true.
+   */
+  hasMoreUpstream: boolean
+  /** True when the 5-page walk cap was hit before the end was confirmed. */
+  truncated: boolean
+}
+
 /**
  * `GET /v2/team/{teamId}/task` has no text search parameter: it filters by
  * structure (space, list, status, assignee, ...) and date ranges, never by
  * what the task is about. `clickup_search_tasks` fetches the (optionally
  * space/list-narrowed) task list here and does the text matching itself.
+ *
+ * A single call to this endpoint returns at most one 100-task upstream
+ * page, which is not the same thing as "every task matching the filter" -
+ * a workspace with more than 100 tasks in scope silently lost everything
+ * past the first page before this used `walkTaskPages`. Since local text
+ * filtering happens after this returns, and the match rate against the
+ * query is unknowable in advance, this walks up to the shared 5-page cap
+ * every time rather than trying to guess how many raw tasks would be
+ * "enough" - `clickup_list_tasks`'s `listTasksRaw`, whose filters are all
+ * applied server-side, can target a precise `minItems` instead.
  */
-export async function getWorkspaceTasks(ctx: ClickUpContext, filter: WorkspaceTaskFilter = {}): Promise<Task[]> {
-  const res = await ctx.client.request({
-    method: 'GET',
-    path: `/team/${ctx.teamId}/task`,
-    schema: GetTasksResponseSchema,
-    query: {
-      'space_ids[]': filter.spaceId,
-      'list_ids[]': filter.listId,
-      include_closed: filter.includeClosed ?? false,
-    },
-  })
-  return res.tasks
+export async function getWorkspaceTasks(
+  ctx: ClickUpContext,
+  filter: WorkspaceTaskFilter = {},
+): Promise<WorkspaceTasksResult> {
+  const walked = await walkTaskPages(async (page) => {
+    const res = await ctx.client.request({
+      method: 'GET',
+      path: `/team/${ctx.teamId}/task`,
+      schema: GetTasksResponseSchema,
+      query: {
+        'space_ids[]': filter.spaceId,
+        'list_ids[]': filter.listId,
+        include_closed: filter.includeClosed ?? false,
+        page,
+      },
+    })
+    return { tasks: res.tasks }
+  }, Number.MAX_SAFE_INTEGER)
+
+  return { tasks: walked.items, hasMoreUpstream: walked.hasMoreUpstream, truncated: walked.truncated }
 }
 
 // -- Assembled, cached views ---------------------------------------------

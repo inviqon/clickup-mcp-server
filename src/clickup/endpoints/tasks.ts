@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
 import { formatDate } from '../../core/dates.js'
 import { loadListMeta, type ListMeta } from './workspace.js'
+import { walkTaskPages } from '../pagination.js'
 import {
   GetTaskCommentsResponseSchema,
   GetTasksResponseSchema,
@@ -158,6 +159,20 @@ export type ListTasksFilter = {
   dueAfterMs?: number | undefined
   includeClosed: boolean
   includeSubtasks: boolean
+  /**
+   * How many raw tasks to gather before stopping the upstream walk, i.e.
+   * `offset + limit` of the caller's requested page - every filter here is
+   * applied server-side, so a raw task is always a result task, unlike
+   * `getWorkspaceTasks`, which cannot know a target count in advance
+   * because it filters locally after fetching.
+   */
+  minItems: number
+}
+
+export type ListTasksResult = {
+  tasks: Task[]
+  hasMoreUpstream: boolean
+  truncated: boolean
 }
 
 /**
@@ -169,8 +184,13 @@ export type ListTasksFilter = {
  * is responsible for requiring exactly one, since asking ClickUp for tasks
  * with neither would silently mean "the whole workspace", a scope this tool
  * does not offer.
+ *
+ * Walks upstream pages via `walkTaskPages` rather than fetching a single
+ * page: one 100-task page is not "all matching tasks," and treating it as
+ * such makes `total`/`has_more`/`next_offset` actively wrong for any list
+ * or space with more than 100 tasks in scope.
  */
-export async function listTasksRaw(ctx: ClickUpContext, filter: ListTasksFilter): Promise<Task[]> {
+export async function listTasksRaw(ctx: ClickUpContext, filter: ListTasksFilter): Promise<ListTasksResult> {
   const query = {
     'assignees[]': filter.assignees,
     'statuses[]': filter.statuses,
@@ -181,20 +201,27 @@ export async function listTasksRaw(ctx: ClickUpContext, filter: ListTasksFilter)
     subtasks: filter.includeSubtasks,
   }
 
-  const res = filter.listId
-    ? await ctx.client.request({
-        method: 'GET',
-        path: `/list/${filter.listId}/task`,
-        schema: GetTasksResponseSchema,
-        query,
-      })
-    : await ctx.client.request({
-        method: 'GET',
-        path: `/team/${ctx.teamId}/task`,
-        schema: GetTasksResponseSchema,
-        query: { ...query, 'space_ids[]': filter.spaceId },
-      })
-  return res.tasks
+  const walked = filter.listId
+    ? await walkTaskPages(async (page) => {
+        const res = await ctx.client.request({
+          method: 'GET',
+          path: `/list/${filter.listId}/task`,
+          schema: GetTasksResponseSchema,
+          query: { ...query, page },
+        })
+        return { tasks: res.tasks, lastPage: res.last_page }
+      }, filter.minItems)
+    : await walkTaskPages(async (page) => {
+        const res = await ctx.client.request({
+          method: 'GET',
+          path: `/team/${ctx.teamId}/task`,
+          schema: GetTasksResponseSchema,
+          query: { ...query, 'space_ids[]': filter.spaceId, page },
+        })
+        return { tasks: res.tasks }
+      }, filter.minItems)
+
+  return { tasks: walked.items, hasMoreUpstream: walked.hasMoreUpstream, truncated: walked.truncated }
 }
 
 // -- Normalised projections ---------------------------------------------
@@ -211,6 +238,8 @@ export type AssigneeOut = { id: string; username: string }
  * infers as `string | undefined`, not "may be absent, but string when
  * present") is only assignable to a type that says the same thing.
  */
+export type CustomFieldErrorOut = { field: string; error: string }
+
 export type TaskOut = {
   id: string
   name: string
@@ -229,6 +258,15 @@ export type TaskOut = {
   url: string
   subtasks?: SubtaskOut[] | undefined
   comments?: CommentOut[] | undefined
+  /**
+   * Present only when the task itself was created/updated successfully but
+   * one or more of its custom field writes (a separate API call per field)
+   * failed afterward. The task id and every other field above still
+   * reflect the real, successful write - only the named fields did not
+   * take. Never thrown away in favour of a bare error: the caller already
+   * has a real task in ClickUp by the time this can happen.
+   */
+  custom_field_errors?: CustomFieldErrorOut[] | undefined
 }
 
 /**
@@ -298,8 +336,15 @@ export function toTaskOut(task: TaskDetail, ctx: ClickUpContext): TaskOut {
   return out
 }
 
-export function toTaskSummary(task: Task): TaskSummary {
-  const due = task.due_date != null ? task.due_date : undefined
+/**
+ * Formats `due_date` through `formatMsField`, the same helper `toTaskOut`
+ * uses - a raw ClickUp epoch-millisecond string must never reach the agent
+ * unformatted just because it came through the list/summary path instead
+ * of the single-task path. Both must show the same value the same way for
+ * the same task.
+ */
+export function toTaskSummary(task: Task, timezone: string): TaskSummary {
+  const due = formatMsField(task.due_date, timezone)
   return {
     id: task.id,
     name: task.name,

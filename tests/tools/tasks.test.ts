@@ -99,6 +99,74 @@ describe('clickup_list_tasks', () => {
     const md = tool('clickup_list_tasks').render(out, testContext())
     expect(md).toContain('No tasks found in list 100')
   })
+
+  it('rejects list_id and space_id together rather than silently picking one (Finding 4)', async () => {
+    await expect(
+      tool('clickup_list_tasks').handler({ list_id: '100', space_id: '1' }, testContext()),
+    ).rejects.toThrow(/exactly one of list_id or space_id.*list_id "100".*space_id "1"/)
+  })
+
+  it('formats a present due_date with the configured timezone offset rather than raw epoch ms (Finding 1)', async () => {
+    mswServer.use(...fx.listTasksHandlers())
+    const out = await tool('clickup_list_tasks').handler({ list_id: '100' }, testContext())
+    const items = out.items as Array<{ id: string; due_date?: string }>
+    const withDue = items.find((t) => t.id === '9aa')
+    // TASK_100_A's due_date (1700000000000ms = 2023-11-14) falls in Berlin's
+    // winter (CET, +01:00) offset - the point is that an offset is present
+    // and the raw millisecond string is gone, not which specific offset.
+    expect(withDue?.due_date).toMatch(/\+01:00/)
+    expect(withDue?.due_date).not.toBe('1700000000000')
+    const md = tool('clickup_list_tasks').render(out, testContext())
+    expect(md).toMatch(/due .*\+01:00/)
+    expect(md).not.toContain('1700000000000')
+  })
+
+  it('walks a second upstream page to gather enough items for the requested offset+limit (Finding 3)', async () => {
+    mswServer.use(...fx.twoPageListTasksHandlers())
+    const out = await tool('clickup_list_tasks').handler({ list_id: '100', offset: 120, limit: 10 }, testContext())
+    const items = out.items as Array<{ id: string }>
+    // Items 120..129 (0-indexed) fall inside page 1 (ids p1-0..p1-49), which
+    // only exists because the walker fetched a second upstream page - a
+    // single-page fetch (the pre-fix behaviour) could never produce these.
+    expect(items).toHaveLength(10)
+    expect(items[0]!.id).toBe('p1-20')
+    expect(out.total).toBe(150)
+    // There genuinely is more data beyond this page (150 > offset+limit),
+    // which paginate() already computes correctly on its own once given
+    // the full walked set - what this test guards is `bounded` staying
+    // unset, since the walk reached a confirmed end (last_page) rather
+    // than hitting the safety cap.
+    expect(out.has_more).toBe(true)
+    expect(out.next_offset).toBe(130)
+    expect(out.bounded).toBeUndefined()
+  })
+
+  it('discloses a bounded result honestly when the 5-page cap is hit before the end is confirmed (Finding 3)', async () => {
+    mswServer.use(...fx.unboundedListTasksHandlers())
+    // offset+limit (550) exceeds what 5 pages of 100 can ever supply (500),
+    // so the walker must hit the cap without ever satisfying "enough".
+    const out = await tool('clickup_list_tasks').handler({ list_id: '100', offset: 450, limit: 100 }, testContext())
+    expect(out.bounded).toBe(true)
+    expect(out.has_more).toBe(true)
+    const md = tool('clickup_list_tasks').render(out, testContext())
+    expect(md).toContain('bounded')
+    expect(md).toContain('narrow')
+  })
+
+  it('discloses bounded even when the requested page itself comes back empty, rather than reading as a confirmed "no tasks" (Finding 3)', async () => {
+    mswServer.use(...fx.unboundedListTasksHandlers())
+    // Only 500 raw tasks are ever reachable within the cap; an offset past
+    // that returns zero items for THIS page even though the true dataset
+    // may be much larger - the empty-result message must not claim a
+    // confirmed, definitive "no tasks" in that case.
+    const out = await tool('clickup_list_tasks').handler({ list_id: '100', offset: 1000, limit: 10 }, testContext())
+    expect(out.items).toEqual([])
+    expect(out.bounded).toBe(true)
+    expect(out.has_more).toBe(true)
+    const md = tool('clickup_list_tasks').render(out, testContext())
+    expect(md).toContain('bounded')
+    expect(md).not.toBe('No tasks found in list 100')
+  })
 })
 
 describe('clickup_create_task', () => {
@@ -159,6 +227,46 @@ describe('clickup_create_task', () => {
       testContext(),
     )
     expect(body.parent).toBe('86abc')
+  })
+
+  it('returns the re-fetched task with the custom field actually populated, not the pre-write snapshot (Finding 2)', async () => {
+    mswServer.use(...fx.listMetaHandlers(), ...fx.createWithFieldHandlers([]))
+    const out = await tool('clickup_create_task').handler(
+      { list_id: '100', name: 'x', custom_fields: { Client: 'Selectry' } },
+      testContext(),
+    )
+    expect(out.id).toBe('86new')
+    expect(out.custom_fields).toEqual([{ id: 'cf-1', name: 'Client', value: 'Selectry' }])
+    expect(out.custom_field_errors).toBeUndefined()
+  })
+
+  it('BREAK CHECK: keeps the task id and names the failed field when a custom field write fails after creation (Finding 2)', async () => {
+    mswServer.use(...fx.listMetaHandlers(), ...fx.createWithFailingFieldHandlers())
+    const out = await tool('clickup_create_task').handler(
+      { list_id: '100', name: 'x', custom_fields: { Client: 'Selectry' } },
+      testContext(),
+    )
+    // The unacceptable outcome this guards against: losing the id and
+    // throwing instead, which would look like nothing was created at all
+    // even though a real task now exists in ClickUp.
+    expect(out.id).toBe('86new')
+    expect(out.custom_field_errors).toHaveLength(1)
+    expect(out.custom_field_errors[0]).toMatchObject({ field: 'Client' })
+    expect(out.custom_field_errors[0].error.length).toBeGreaterThan(0)
+    const md = tool('clickup_create_task').render(out, testContext())
+    expect(md).toContain('86new')
+    expect(md).toContain('Client')
+  })
+
+  it('rejects a non-numeric assignee id loudly instead of silently sending null, before any write (Minor 2)', async () => {
+    // Deliberately no POST /v2/list/100/task handler registered: if the
+    // guard were skipped, the (NaN -> null) request would actually be
+    // attempted and msw's onUnhandledRequest:'error' strategy would fail
+    // this test with an unhandled-request error instead of the assertion
+    // below, proving the guard fires before any network call.
+    await expect(
+      tool('clickup_create_task').handler({ list_id: '100', name: 'x', assignees: ['not-a-number'] }, testContext()),
+    ).rejects.toThrow(/"not-a-number".*not a valid ClickUp user id.*clickup_resolve_member/)
   })
 })
 
@@ -230,6 +338,27 @@ describe('clickup_update_task', () => {
     await tool('clickup_update_task').handler({ task_id: '86abc', time_estimate: '1h30m' }, testContext())
     expect(body.time_estimate).toBe(5_400_000)
   })
+
+  it('returns the re-fetched task with the custom field actually populated, not the pre-write snapshot (Finding 2)', async () => {
+    mswServer.use(...fx.listMetaHandlers(), ...fx.updateWithFieldHandlers())
+    const out = await tool('clickup_update_task').handler(
+      { task_id: '86abc', custom_fields: { Client: 'Selectry' } },
+      testContext(),
+    )
+    expect(out.custom_fields).toEqual([{ id: 'cf-1', name: 'Client', value: 'Selectry' }])
+    expect(out.custom_field_errors).toBeUndefined()
+  })
+
+  it('BREAK CHECK: keeps the task id and names the failed field when a custom field write fails after updating (Finding 2)', async () => {
+    mswServer.use(...fx.listMetaHandlers(), ...fx.updateWithFieldHandlers({ failing: true }))
+    const out = await tool('clickup_update_task').handler(
+      { task_id: '86abc', custom_fields: { Client: 'Selectry' } },
+      testContext(),
+    )
+    expect(out.id).toBe('86abc')
+    expect(out.custom_field_errors).toHaveLength(1)
+    expect(out.custom_field_errors[0]).toMatchObject({ field: 'Client' })
+  })
 })
 
 describe('clickup_update_tasks_bulk', () => {
@@ -274,6 +403,25 @@ describe('clickup_update_tasks_bulk', () => {
     expect(md).toContain('- 86abc')
     expect(md).toContain('**Failed**')
     expect(md).toContain('86bad:')
+  })
+
+  it('names the failing task in its 404 message rather than a generic "Resource unknown" (Minor 1)', async () => {
+    mswServer.use(...fx.bulkHandlers({ failing: ['86bad'] }))
+    const out = await tool('clickup_update_tasks_bulk').handler({ task_ids: ['86bad'], status: 'closed' }, testContext())
+    const failed = out.failed as Array<{ task_id: string; error: string }>
+    expect(failed[0]!.error).toContain('Task 86bad')
+    expect(failed[0]!.error).not.toContain('Resource unknown')
+  })
+
+  it('rejects a non-numeric assignee id loudly instead of silently sending null, before any write (Minor 2)', async () => {
+    // No PUT handler registered: a skipped guard would attempt the write
+    // and fail on an unhandled request instead of this assertion.
+    await expect(
+      tool('clickup_update_tasks_bulk').handler(
+        { task_ids: ['86abc'], assignees: ['not-a-number'] },
+        testContext(),
+      ),
+    ).rejects.toThrow(/"not-a-number".*not a valid ClickUp user id.*clickup_resolve_member/)
   })
 })
 
@@ -347,6 +495,17 @@ describe('clickup_move_task', () => {
     expect(sentBody.status_mappings).toEqual([{ source_status_id: 'src-open', destination_status_id: 'dst-todo' }])
     expect(out.id).toBe('86abc')
   })
+
+  it('distinguishes "move succeeded, confirmation read failed" from an ordinary failure (Finding 5)', async () => {
+    mswServer.use(
+      ...fx.moveSucceedsThenRefetchFailsHandlers(),
+      ...fx.listMetaHandlers({ listId: '200' }),
+      http.put(`${API}/v3/workspaces/9007/tasks/86abc/home_list/200`, () => HttpResponse.json({})),
+    )
+    await expect(
+      tool('clickup_move_task').handler({ task_id: '86abc', list_id: '200' }, testContext()),
+    ).rejects.toThrow(/succeeded, but reading task 86abc back afterward failed.*already happened/)
+  })
 })
 
 describe('clickup_delete_task', () => {
@@ -396,5 +555,16 @@ describe('clickup_link_tasks', () => {
     )
     expect(out.name).toBe('Fix login bug')
     expect(out.other_task_id).toBe('86other')
+  })
+
+  it('distinguishes "link succeeded, confirmation read failed" from an ordinary failure (Finding 5)', async () => {
+    const seen: fx.LinkCall = {}
+    mswServer.use(...fx.linkHandlers(seen), ...fx.linkRefetchFailsHandlers())
+    await expect(
+      tool('clickup_link_tasks').handler({ task_id: '86abc', other_task_id: '86other' }, testContext()),
+    ).rejects.toThrow(/succeeded, but reading task 86abc back afterward failed.*already happened/)
+    // The link call itself must still have gone through - this is not a
+    // case where the write also failed.
+    expect(seen.path).toBe('/api/v2/task/86abc/link/86other')
   })
 })

@@ -9,6 +9,7 @@ import {
 } from '../clickup/endpoints/workspace.js'
 import type { MemberUser, Task } from '../clickup/schemas.js'
 import { nameWithId, paginate } from '../format/common.js'
+import { boundPage } from '../clickup/pagination.js'
 import { renderWorkspaceTree } from '../format/tree.js'
 
 // ---------------------------------------------------------------------------
@@ -232,6 +233,13 @@ const searchTasksOutputShape = {
   items: z.array(taskSummaryOutputShape),
   has_more: z.boolean(),
   next_offset: z.number().optional(),
+  /**
+   * Present only when the walk over upstream pages hit its hard cap before
+   * ClickUp confirmed the end (see `walkTaskPages`, src/clickup/pagination.ts).
+   * `total`/`count` above only describe what was actually fetched and
+   * matched, not the true count in the workspace, whenever this is true.
+   */
+  bounded: z.boolean().optional(),
 }
 
 type TaskSummary = z.infer<typeof taskSummaryOutputShape>
@@ -271,19 +279,33 @@ export const searchTasksTool: ToolDefinition<typeof searchTasksInputShape, typeo
   inputSchema: searchTasksInputShape,
   outputSchema: searchTasksOutputShape,
   handler: async ({ query, space_id, list_id, include_closed, limit, offset }, ctx) => {
-    const tasks = await getWorkspaceTasks(ctx, { spaceId: space_id, listId: list_id, includeClosed: include_closed })
+    const { tasks, hasMoreUpstream, truncated } = await getWorkspaceTasks(ctx, {
+      spaceId: space_id,
+      listId: list_id,
+      includeClosed: include_closed,
+    })
     const matched = tasks.filter((t) => taskMatches(t, query))
-    const page = paginate(matched.map(toTaskSummary), { offset, limit })
-    return { query, ...page }
+    const page = boundPage(paginate(matched.map(toTaskSummary), { offset, limit }), { hasMoreUpstream })
+    return { query, ...page, ...(truncated ? { bounded: true } : {}) }
   },
   render: (out) => {
     if (out.items.length === 0) {
-      return `No tasks found matching "${out.query}"`
+      return out.bounded
+        ? `No tasks matching "${out.query}" found, but the result is bounded to the first 5 upstream pages ` +
+            '(500 candidate tasks) - the safety cap was hit before this could be confirmed as a true empty ' +
+            'result. Narrow with space_id or list_id to search a smaller scope and get a definitive answer.'
+        : `No tasks found matching "${out.query}"`
     }
     return [
       `# Tasks matching "${out.query}"`,
       '',
       `Showing ${out.count} of ${out.total}${out.has_more ? ' (more available, pass a higher offset)' : ''}`,
+      ...(out.bounded
+        ? [
+            'Result bounded to the first 5 upstream pages (500 candidate tasks) before local text matching; ' +
+              'narrow with space_id or list_id to search a smaller scope and see the rest.',
+          ]
+        : []),
       '',
       ...out.items.map(
         (t) =>
