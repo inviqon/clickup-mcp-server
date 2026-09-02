@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { AnyToolDefinition, ToolDefinition } from '../core/registry.js'
 import { formatDate, formatDurationHm, parseDuration, resolveDate } from '../core/dates.js'
-import { toAgentMessage } from '../core/errors.js'
+import { ClickUpUsageError, toAgentMessage } from '../core/errors.js'
 import {
   createTimeEntryRaw,
   deleteTimeEntryRaw,
@@ -74,7 +74,7 @@ export const startTimerTool: ToolDefinition<typeof startTimerInputShape, typeof 
         running.task !== null && running.task !== undefined
           ? nameWithId(running.task.name, running.task.id)
           : `entry ${running.id}`
-      throw new Error(
+      throw new ClickUpUsageError(
         `A timer is already running on ${label}. Starting a new one would silently stop it in ClickUp and lose ` +
           'whatever time it has already tracked - that cannot be recovered afterward. Call clickup_stop_timer ' +
           'first if you want to stop it and start this one instead.',
@@ -145,7 +145,7 @@ export const stopTimerTool: ToolDefinition<typeof stopTimerInputShape, typeof ti
       )
       return toTimeEntryOut(updated, ctx.timezone)
     } catch (err) {
-      throw new Error(
+      throw new ClickUpUsageError(
         `The timer stopped successfully (entry ${stopped.id}, ${stoppedOut.duration} tracked), but setting its ` +
           `description/tags afterward failed: ${toAgentMessage(err, { resource: 'time entry', id: stopped.id })} ` +
           'The stop already happened in ClickUp and cannot be undone - check the entry with ' +

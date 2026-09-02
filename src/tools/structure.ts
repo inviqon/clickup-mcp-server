@@ -19,6 +19,7 @@ import {
 import type { FolderDetail, ListWriteResponse, SpaceDetail } from '../clickup/schemas.js'
 import { omitUnset, nameWithId } from '../format/common.js'
 import { toAssigneeId } from './tasks.js'
+import { ClickUpUsageError } from '../core/errors.js'
 
 /**
  * The second gate every delete tool applies on top of admin mode (Task 13):
@@ -30,7 +31,7 @@ import { toAssigneeId } from './tasks.js'
  */
 function assertConfirmName(kind: string, actualName: string, confirmName: string): void {
   if (actualName !== confirmName) {
-    throw new Error(`confirm_name "${confirmName}" does not match ${kind} name "${actualName}"`)
+    throw new ClickUpUsageError(`confirm_name "${confirmName}" does not match ${kind} name "${actualName}"`)
   }
 }
 
@@ -341,13 +342,13 @@ const createListInputShape = {
 
 function assertExactlyOneListParent(args: { folder_id?: string | undefined; space_id?: string | undefined }): void {
   if (args.folder_id === undefined && args.space_id === undefined) {
-    throw new Error(
+    throw new ClickUpUsageError(
       'clickup_create_list needs exactly one of folder_id or space_id to know where to create the list. ' +
         'Provide either folder_id or space_id.',
     )
   }
   if (args.folder_id !== undefined && args.space_id !== undefined) {
-    throw new Error(
+    throw new ClickUpUsageError(
       `clickup_create_list needs exactly one of folder_id or space_id, not both. Got folder_id "${args.folder_id}" ` +
         `and space_id "${args.space_id}". Drop whichever one you did not mean.`,
     )

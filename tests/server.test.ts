@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { buildServer } from '../src/server.js'
 import type { AnyToolDefinition } from '../src/core/registry.js'
 import { loadConfig } from '../src/core/config.js'
+import { ClickUpUsageError } from '../src/core/errors.js'
 
 const echo = {
   name: 'clickup_echo', title: 'Echo', description: 'Echo a value.',
@@ -18,6 +19,13 @@ const echo = {
 const failing = {
   ...echo, name: 'clickup_fail',
   handler: async () => { throw new Error('upstream exploded') },
+} as unknown as AnyToolDefinition
+
+const misused = {
+  ...echo, name: 'clickup_misused',
+  handler: async () => {
+    throw new ClickUpUsageError('List 100 has no status "dnoe". Available: open, closed')
+  },
 } as unknown as AnyToolDefinition
 
 async function connect(tools: AnyToolDefinition[]) {
@@ -68,6 +76,19 @@ describe('buildServer', () => {
     const text = (res.content as Array<{ text: string }>)[0]!.text
     expect(text).toContain('Unexpected error')
     expect(text).not.toContain('at ')
+  })
+
+  // The deliberate errors the tools raise (a bad status name, an unknown
+  // custom field, a confirm_name mismatch) are the actionable ones. Calling
+  // them "unexpected" tells the agent to retry when the fix is to correct
+  // the argument the message already names.
+  it('delivers a deliberate usage error to the client unwrapped', async () => {
+    const client = await connect([misused])
+    const res = await client.callTool({ name: 'clickup_misused', arguments: { value: 'x' } })
+    expect(res.isError).toBe(true)
+    const text = (res.content as Array<{ text: string }>)[0]!.text
+    expect(text).toBe('List 100 has no status "dnoe". Available: open, closed')
+    expect(text).not.toContain('Unexpected error')
   })
 })
 

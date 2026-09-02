@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ClickUpApiError, ClickUpSchemaError, toAgentMessage } from '../../src/core/errors.js'
+import { ClickUpApiError, ClickUpSchemaError, toAgentMessage, ClickUpUsageError } from '../../src/core/errors.js'
 
 const err = (status: number, endpoint: string, ecode?: string) =>
   new ClickUpApiError('api failed', { status, endpoint, ecode })
@@ -53,5 +53,19 @@ describe('toAgentMessage', () => {
     const msg = toAgentMessage(err(500, '/v2/task/1'))
     expect(msg).toContain('ClickUp API error (500)')
     expect(msg).toContain('Retry')
+  })
+
+  // Deliberate, actionable errors (a bad status name, an unknown custom
+  // field, a confirm_name mismatch, the running-timer guard) used to be
+  // plain Errors and so reached the agent as "Unexpected error: ...", which
+  // reads as a transient fault to retry rather than an argument to fix.
+  it('passes a usage error through verbatim rather than calling it unexpected', () => {
+    const msg = toAgentMessage(new ClickUpUsageError('List 100 has no status "dnoe". Available: open, closed'))
+    expect(msg).toBe('List 100 has no status "dnoe". Available: open, closed')
+    expect(msg).not.toContain('Unexpected error')
+  })
+
+  it('still wraps a genuinely unexpected error', () => {
+    expect(toAgentMessage(new Error('kaboom'))).toBe('Unexpected error: kaboom')
   })
 })

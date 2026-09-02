@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { AnyToolDefinition, ToolDefinition } from '../core/registry.js'
 import type { ClickUpContext } from '../core/context.js'
 import { parseDuration, resolveDate } from '../core/dates.js'
-import { toAgentMessage } from '../core/errors.js'
+import { ClickUpUsageError, toAgentMessage } from '../core/errors.js'
 import { loadListMeta } from '../clickup/endpoints/workspace.js'
 import {
   addDependency,
@@ -49,7 +49,7 @@ const customFieldsInputSchema = z.record(z.string(), z.union([z.string(), z.numb
 export function toAssigneeId(id: string): number {
   const n = Number(id)
   if (Number.isNaN(n)) {
-    throw new Error(
+    throw new ClickUpUsageError(
       `Assignee id "${id}" is not a valid ClickUp user id (expected a number, as a string). ` +
         'Use clickup_resolve_member to find the correct id rather than guessing one.',
     )
@@ -70,7 +70,7 @@ export async function refetchAfterWrite(ctx: ClickUpContext, taskId: string, wha
   try {
     return await getTaskDetail(ctx, taskId)
   } catch (err) {
-    throw new Error(
+    throw new ClickUpUsageError(
       `${whatSucceeded} succeeded, but reading task ${taskId} back afterward failed: ` +
         `${toAgentMessage(err, { resource: 'task', id: taskId })} The write already happened in ClickUp - check ` +
         `the task's current state (e.g. with clickup_get_task) before retrying, rather than assuming it failed.`,
@@ -239,13 +239,13 @@ export const listTasksTool: ToolDefinition<typeof listTasksInputShape, typeof li
     const listId = args.list_id
     const spaceId = args.space_id
     if (listId === undefined && spaceId === undefined) {
-      throw new Error(
+      throw new ClickUpUsageError(
         'clickup_list_tasks needs list_id or space_id to know where to look. Use clickup_get_workspace_tree ' +
           'to find one, or clickup_search_tasks to search the whole workspace by text instead.',
       )
     }
     if (listId !== undefined && spaceId !== undefined) {
-      throw new Error(
+      throw new ClickUpUsageError(
         `clickup_list_tasks needs exactly one of list_id or space_id, not both. Got list_id "${listId}" and ` +
           `space_id "${spaceId}". Drop whichever one you did not mean.`,
       )
@@ -654,14 +654,14 @@ export const moveTaskTool: ToolDefinition<typeof moveTaskInputShape, typeof task
     if (!destStatusNames.includes(currentStatusName)) {
       const mapping = (args.status_mappings ?? []).find((m) => m.from === currentStatusName)
       if (!mapping) {
-        throw new Error(
+        throw new ClickUpUsageError(
           `Task ${args.task_id}'s status "${currentStatusName}" does not exist in list ${args.list_id}. ` +
             `Available: ${destStatusNames.join(', ')}. Provide status_mappings to map it, ` +
             `e.g. [{ from: "${currentStatusName}", to: "<a status from the list above>" }].`,
         )
       }
       if (!destStatusNames.includes(mapping.to)) {
-        throw new Error(
+        throw new ClickUpUsageError(
           `status_mappings maps "${mapping.from}" to "${mapping.to}", but list ${args.list_id} has no status ` +
             `"${mapping.to}". Available: ${destStatusNames.join(', ')}.`,
         )
@@ -671,7 +671,7 @@ export const moveTaskTool: ToolDefinition<typeof moveTaskInputShape, typeof task
       const sourceStatusId = sourceMeta.statuses.find((s) => s.status === mapping.from)?.id
       const destStatusId = destMeta.statuses.find((s) => s.status === mapping.to)?.id
       if (sourceStatusId === undefined || destStatusId === undefined) {
-        throw new Error(
+        throw new ClickUpUsageError(
           `Cannot map status "${mapping.from}" to "${mapping.to}": one of these lists reports no status id for ` +
             `it (it is on the default open/closed status set, not custom statuses), so ClickUp's move endpoint ` +
             `cannot be told how to remap it.`,

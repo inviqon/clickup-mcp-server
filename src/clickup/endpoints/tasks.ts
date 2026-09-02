@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
 import { formatDate } from '../../core/dates.js'
+import { ClickUpUsageError } from '../../core/errors.js'
 import { loadListMeta, type ListMeta } from './workspace.js'
 import { walkTaskPages } from '../pagination.js'
 import {
@@ -401,7 +402,7 @@ export function toTaskSummary(task: Task, timezone: string): TaskSummary {
 export function assertValidStatus(meta: ListMeta, status: string): void {
   if (!meta.statuses.some((s) => s.status === status)) {
     const available = meta.statuses.map((s) => s.status).join(', ')
-    throw new Error(`List ${meta.id} has no status "${status}". Available: ${available}`)
+    throw new ClickUpUsageError(`List ${meta.id} has no status "${status}". Available: ${available}`)
   }
 }
 
@@ -424,7 +425,7 @@ export async function resolveCustomFields(
     const field = meta.custom_fields.find((f) => f.name === name)
     if (!field) {
       const available = meta.custom_fields.map((f) => f.name).join(', ')
-      throw new Error(`List ${listId} has no custom field "${name}". Available: ${available}`)
+      throw new ClickUpUsageError(`List ${listId} has no custom field "${name}". Available: ${available}`)
     }
     return { id: field.id, value }
   })

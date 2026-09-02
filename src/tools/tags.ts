@@ -4,6 +4,7 @@ import { addTaskTag, listSpaceTags, removeTaskTag } from '../clickup/endpoints/t
 import { findSpaceForList, loadWorkspaceTree } from '../clickup/endpoints/workspace.js'
 import { getTaskDetail } from '../clickup/endpoints/tasks.js'
 import { refetchAfterWrite } from './tasks.js'
+import { ClickUpUsageError } from '../core/errors.js'
 
 // ---------------------------------------------------------------------------
 // clickup_list_space_tags
@@ -81,7 +82,7 @@ export const setTaskTagsTool: ToolDefinition<typeof setTaskTagsInputShape, typeo
     const tree = await loadWorkspaceTree(ctx)
     const space = findSpaceForList(tree, listId)
     if (space === undefined) {
-      throw new Error(
+      throw new ClickUpUsageError(
         `Could not resolve the space for task ${args.task_id} (list ${listId}) from the workspace tree. ` +
           'Call clickup_get_workspace_tree to check the list still exists in a known space.',
       )
@@ -91,7 +92,7 @@ export const setTaskTagsTool: ToolDefinition<typeof setTaskTagsInputShape, typeo
     const availableNames = spaceTags.map((t) => t.name)
     for (const tag of args.tags) {
       if (!availableNames.includes(tag)) {
-        throw new Error(`Space ${space.id} has no tag "${tag}". Available: ${availableNames.join(', ')}`)
+        throw new ClickUpUsageError(`Space ${space.id} has no tag "${tag}". Available: ${availableNames.join(', ')}`)
       }
     }
 

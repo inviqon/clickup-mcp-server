@@ -38,6 +38,27 @@ export class ClickUpSchemaError extends Error {
   }
 }
 
+/**
+ * An error this server raises deliberately, whose message is already
+ * written for the agent: a status name that does not exist in the list, a
+ * custom field name that does not exist, a `confirm_name` mismatch, a
+ * running timer that would be silently stopped, a write that succeeded
+ * followed by a read that did not.
+ *
+ * It exists so `toAgentMessage` can pass these through verbatim. Every one
+ * of them used to be a plain `Error` and so came out as
+ * "Unexpected error: ...", which is precisely backwards - these are the
+ * EXPECTED errors, the ones the error module exists to make actionable. An
+ * agent reading "Unexpected error" retries blindly instead of correcting
+ * the argument the message just named for it.
+ */
+export class ClickUpUsageError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ClickUpUsageError'
+  }
+}
+
 export type AgentMessageHint = {
   resource?: string
   id?: string
@@ -79,6 +100,12 @@ export function toAgentMessage(err: unknown, hint?: AgentMessageHint): string {
   }
   if (err instanceof ClickUpSchemaError) {
     return schemaErrorMessage(err)
+  }
+  // Passed through verbatim: the message was written for this audience and
+  // wrapping it in "Unexpected error" would tell the agent the opposite of
+  // what is true.
+  if (err instanceof ClickUpUsageError) {
+    return err.message
   }
   const message = err instanceof Error ? err.message : String(err)
   return `Unexpected error: ${message}`
