@@ -32,4 +32,29 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, CLICKUP_RATE_LIMIT: 'lots' }))
       .toThrow(/CLICKUP_RATE_LIMIT/)
   })
+
+  it('parses comma separated disabled tools and allowed origins', () => {
+    const c = loadConfig({
+      ...base,
+      CLICKUP_DISABLED_TOOLS: 'clickup_delete_task, clickup_delete_list ,',
+      CLICKUP_ALLOWED_ORIGINS: 'https://a.example, https://b.example ,',
+    })
+    expect(c.disabledTools).toEqual(['clickup_delete_task', 'clickup_delete_list'])
+    expect(c.allowedOrigins).toEqual(['https://a.example', 'https://b.example'])
+  })
+
+  it('accepts a valid custom numeric override', () => {
+    const c = loadConfig({ ...base, CLICKUP_RATE_LIMIT: '250' })
+    expect(c.rateLimit).toBe(250)
+  })
+
+  it('rejects an unknown log level naming the valid values', () => {
+    expect(() => loadConfig({ ...base, LOG_LEVEL: 'verbose' }))
+      .toThrow(/debug, info, warn, error/)
+  })
+
+  it('rejects an unknown category naming the valid values', () => {
+    expect(() => loadConfig({ ...base, CLICKUP_ENABLED_CATEGORIES: 'tasks,bogus' }))
+      .toThrow(/unknown category "bogus"/)
+  })
 })

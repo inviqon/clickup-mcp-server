@@ -35,18 +35,18 @@ function requiredString(name: string) {
     .min(1, `${name} is required`)
 }
 
+function splitCommaList(value: string): string[] {
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+}
+
 function optionalList() {
   return z
     .string()
     .optional()
-    .transform((value) =>
-      value === undefined
-        ? []
-        : value
-            .split(',')
-            .map((entry) => entry.trim())
-            .filter((entry) => entry.length > 0),
-    )
+    .transform((value) => (value === undefined ? [] : splitCommaList(value)))
 }
 
 function numberFromString(name: string, defaultValue: number) {
@@ -95,10 +95,7 @@ const rawConfigSchema = z.strictObject({
 
 function parseEnabledCategories(raw: string | undefined): Category[] | null {
   if (raw === undefined) return null
-  const entries = raw
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
+  const entries = splitCommaList(raw)
   for (const entry of entries) {
     if (!CATEGORIES.includes(entry as Category)) {
       throw new Error(
