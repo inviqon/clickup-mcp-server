@@ -136,4 +136,17 @@ describe('clickup_get_my_day', () => {
     expect(md).toContain('Ship the release (86due1)')
     expect(md).toContain('Fix the flaky test (86over1)')
   })
+
+  it('reports the overdue list as bounded when the upstream walker cap is hit, rather than looking complete', async () => {
+    mswServer.use(...fx.myDayHandlers({ overdueUnbounded: true }))
+    const out = await tool('clickup_get_my_day').handler({}, testContext())
+    // 500 tasks (5 pages x 100), not an exact count the walker never
+    // confirmed as the true total - the point of `overdue_bounded` at all.
+    expect(out.overdue).toHaveLength(500)
+    expect(out.overdue_bounded).toBe(true)
+
+    const md = tool('clickup_get_my_day').render(out, testContext())
+    expect(md).toContain('## Overdue')
+    expect(md).toContain('bounded to the first 5 upstream pages (500 tasks)')
+  })
 })

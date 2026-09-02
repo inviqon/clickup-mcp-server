@@ -55,8 +55,21 @@ const myDayOutputShape = {
   tracked_today_error: z.string().optional(),
   due_today: z.array(TaskSummarySchema).optional(),
   due_today_error: z.string().optional(),
+  /**
+   * Present (and true) only when `listTasksRaw`'s bounded page walker
+   * (Task 11, src/clickup/pagination.ts) hit its 5-page/500-task cap
+   * before ClickUp confirmed the end of the due-today results - the same
+   * condition `clickup_list_tasks` reports as `bounded: true`
+   * (src/tools/tasks.ts). Without this, a user with more than 500 tasks
+   * due today would see a partial list that looks complete: not a
+   * failure `Promise.allSettled` can catch, a quiet undercount inside a
+   * success.
+   */
+  due_today_bounded: z.boolean().optional(),
   overdue: z.array(TaskSummarySchema).optional(),
   overdue_error: z.string().optional(),
+  /** Same meaning as `due_today_bounded`, for the overdue query. */
+  overdue_bounded: z.boolean().optional(),
 }
 
 function toRunningTimerOut(entry: TimeEntry, timezone: string): RunningTimerOut {
@@ -162,12 +175,18 @@ export const getMyDayTool: ToolDefinition<typeof myDayInputShape, typeof myDayOu
 
     if (dueTodayResult.status === 'fulfilled') {
       out.due_today = dueTodayResult.value.tasks.map((t) => toTaskSummary(t, ctx.timezone))
+      if (dueTodayResult.value.truncated) {
+        out.due_today_bounded = true
+      }
     } else {
       out.due_today_error = toAgentMessage(dueTodayResult.reason, { resource: 'task', id: 'due today' })
     }
 
     if (overdueResult.status === 'fulfilled') {
       out.overdue = overdueResult.value.tasks.map((t) => toTaskSummary(t, ctx.timezone))
+      if (overdueResult.value.truncated) {
+        out.overdue_bounded = true
+      }
     } else {
       out.overdue_error = toAgentMessage(overdueResult.reason, { resource: 'task', id: 'overdue' })
     }

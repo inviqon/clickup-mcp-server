@@ -115,7 +115,7 @@ export function startTimerHandlers(seen: SeenRequest) {
  * fail with a ClickUp-shaped error, exercising the "stop already happened,
  * only the follow-up failed" path.
  */
-export function stopTimerHandlers(opts: { durationMs?: number; updateFails?: boolean } = {}) {
+export function stopTimerHandlers(opts: { durationMs?: number; updateFails?: boolean; seen?: SeenRequest } = {}) {
   const durationMs = opts.durationMs ?? 45 * 60_000
   const stopped = {
     id: 'timer_1',
@@ -134,10 +134,16 @@ export function stopTimerHandlers(opts: { durationMs?: number; updateFails?: boo
   return [
     http.post(`${API}/v2/team/${TEAM_ID}/time_entries/stop`, () => HttpResponse.json({ data: stopped })),
     http.put(`${API}/v2/team/${TEAM_ID}/time_entries/${stopped.id}`, async ({ request }) => {
+      if (opts.seen !== undefined) {
+        opts.seen.called = true
+      }
       if (opts.updateFails) {
         return HttpResponse.json({ err: 'Server error', ECODE: 'SRV_001' }, { status: 500 })
       }
       const body = (await request.json()) as Record<string, unknown>
+      if (opts.seen !== undefined) {
+        opts.seen.body = body
+      }
       return HttpResponse.json({
         data: {
           ...stopped,

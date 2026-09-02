@@ -100,18 +100,22 @@ describe('clickup_stop_timer', () => {
   })
 
   it('does not attempt a follow-up write when no description or tags were given', async () => {
-    let updateCalled = false
-    mswServer.use(
-      ...fx.stopTimerHandlers(),
-      // Deliberately no PUT handler beyond fx.stopTimerHandlers' own - if a
-      // follow-up write were attempted it would still succeed via that
-      // handler, so this proves absence a different way: no description or
-      // tags means the output must equal the stop response as-is (no
-      // "reviewed"/"Code review" values a follow-up write would introduce).
-    )
+    const seen: fx.SeenRequest = { called: false }
+    mswServer.use(...fx.stopTimerHandlers({ seen }))
     const out = await tool('clickup_stop_timer').handler({}, testContext())
     expect(out.description).toBeUndefined()
-    expect(updateCalled).toBe(false)
+    expect(seen.called).toBe(false)
+  })
+
+  it('clears every tag when an explicit empty array is given, rather than silently dropping the instruction', async () => {
+    const seen: fx.SeenRequest = { called: false }
+    mswServer.use(...fx.stopTimerHandlers({ seen }))
+    await tool('clickup_stop_timer').handler({ tags: [] }, testContext())
+    // An empty array is a different request from "tags not mentioned" - it
+    // must still reach the follow-up write, with ClickUp's own "replace"
+    // semantics, not be treated as equivalent to omitting tags entirely.
+    expect(seen.called).toBe(true)
+    expect(seen.body).toEqual({ tags: [], tag_action: 'replace' })
   })
 })
 

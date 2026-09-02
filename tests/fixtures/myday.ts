@@ -55,8 +55,27 @@ export type MyDayHandlerOpts = {
   dueTodayFails?: boolean
   trackedFails?: boolean
   runningFails?: boolean
+  /**
+   * Makes the overdue query return an unbroken supply of full 100-task
+   * pages that never report fewer than 100 - modelling an overdue backlog
+   * large enough that `walkTaskPages`'s 5-page/500-task safety cap is what
+   * stops the walk, not the query actually ending. Mirrors
+   * `unboundedListTasksHandlers` in tests/fixtures/tasks.ts.
+   */
+  overdueUnbounded?: boolean
   /** Every intercepted request's method + pathname is pushed here, in call order. */
   requestLog?: string[]
+}
+
+function pageTaskFixture(page: number, index: number) {
+  return {
+    id: `p${page}-${index}`,
+    name: `Overdue task ${page}-${index}`,
+    status: { status: 'open', color: '#d3d3d3', orderindex: 0, type: 'open' },
+    due_date: '1756000000000',
+    url: `https://app.clickup.com/t/p${page}-${index}`,
+    list: { id: '100', name: 'Sprint 1', access: true },
+  }
 }
 
 export function myDayHandlers(opts: MyDayHandlerOpts = {}) {
@@ -137,6 +156,11 @@ export function myDayHandlers(opts: MyDayHandlerOpts = {}) {
 
       if (opts.overdueFails) {
         return HttpResponse.json({ err: 'Server error', ECODE: 'SRV_001' }, { status: 500 })
+      }
+      if (opts.overdueUnbounded) {
+        const page = Number(params.get('page') ?? '0')
+        const tasks = Array.from({ length: 100 }, (_, i) => pageTaskFixture(page, i))
+        return HttpResponse.json({ tasks })
       }
       const overdueTasks = opts.overdue ?? [{ id: '86over1', name: 'Fix the flaky test' }]
       return HttpResponse.json({ tasks: overdueTasks.map((t) => overdueTask(t.id, t.name)) })

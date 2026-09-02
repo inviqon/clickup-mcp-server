@@ -56,6 +56,15 @@ export type ListTimeEntriesFilter = {
   taskId?: string | undefined
 }
 
+/**
+ * Deliberately a single request, no page-walking - unlike `listTasksRaw`
+ * (src/clickup/endpoints/tasks.ts), which walks up to 5 upstream pages via
+ * `walkTaskPages`. `GET /v2/team/{teamId}/time_entries` has no page
+ * parameter at all; its result is bounded by the `start_date`/`end_date`
+ * range instead, so there is no upstream page to walk here. The asymmetry
+ * with `listTasksRaw` is intentional, not a gap this function forgot to
+ * close.
+ */
 export async function listTimeEntriesRaw(ctx: ClickUpContext, filter: ListTimeEntriesFilter): Promise<TimeEntry[]> {
   const res = await ctx.client.request({
     method: 'GET',

@@ -37,12 +37,28 @@ export type MyDayOut = {
   tracked_today_error?: string | undefined
   due_today?: MyDayTaskOut[] | undefined
   due_today_error?: string | undefined
+  /** See the matching field's doc comment in src/tools/myday.ts. */
+  due_today_bounded?: boolean | undefined
   overdue?: MyDayTaskOut[] | undefined
   overdue_error?: string | undefined
+  overdue_bounded?: boolean | undefined
 }
 
 function renderTaskLine(t: MyDayTaskOut): string {
   return `- ${nameWithId(t.name, t.id)} [${t.status}]${t.due_date !== undefined ? ` - due ${t.due_date}` : ''}`
+}
+
+/**
+ * Same "bounded" wording `clickup_list_tasks` uses (src/tools/tasks.ts) for
+ * the identical condition - the 5-page/500-task upstream walker cap being
+ * hit before ClickUp confirmed the end - so the two tools describe it the
+ * same way rather than inventing a second phrasing for one fact.
+ */
+function boundedNote(label: string): string {
+  return (
+    `Result bounded to the first 5 upstream pages (500 tasks) before ${label} could confirm the end; ` +
+    'narrow with more specific filters or call clickup_list_tasks directly to see the rest.'
+  )
 }
 
 /**
@@ -84,16 +100,28 @@ export function renderMyDay(out: MyDayOut): string {
     )
   }
 
+  // `out.X_bounded` can only be true alongside a non-empty list: the
+  // walker cap (`walkTaskPages`, src/clickup/pagination.ts) is only hit
+  // after accumulating several full 100-task pages, so there is no
+  // "bounded but empty" case to render here, unlike `clickup_list_tasks`
+  // (src/tools/tasks.ts), which can page *past* a truncated result and
+  // genuinely see zero items on a later page.
   if (out.due_today_error !== undefined) {
     lines.push('', '## Due today', `Due today tasks could not be loaded: ${out.due_today_error}`)
   } else if (out.due_today !== undefined && out.due_today.length > 0) {
     lines.push('', '## Due today', ...out.due_today.map(renderTaskLine))
+    if (out.due_today_bounded === true) {
+      lines.push(boundedNote('this filter'))
+    }
   }
 
   if (out.overdue_error !== undefined) {
     lines.push('', '## Overdue', `Overdue tasks could not be loaded: ${out.overdue_error}`)
   } else if (out.overdue !== undefined && out.overdue.length > 0) {
     lines.push('', '## Overdue', ...out.overdue.map(renderTaskLine))
+    if (out.overdue_bounded === true) {
+      lines.push(boundedNote('this filter'))
+    }
   }
 
   return lines.join('\n')

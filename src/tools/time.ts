@@ -123,8 +123,14 @@ export const stopTimerTool: ToolDefinition<typeof stopTimerInputShape, typeof ti
     const stopped = await stopTimerRaw(ctx)
     const stoppedOut = toTimeEntryOut(stopped, ctx.timezone)
 
-    const hasTags = args.tags !== undefined && args.tags.length > 0
-    if (args.description === undefined && !hasTags) {
+    // Gated on `!== undefined`, not truthiness/length: `tags: []` is an
+    // explicit instruction to clear every tag, and is a different request
+    // from not mentioning tags at all. Collapsing the two (as an earlier
+    // version of this handler did, via `tags.length > 0`) silently dropped
+    // that instruction - the caller believed the tags were cleared and
+    // nothing said otherwise. `clickup_update_time_entry` below already
+    // gets this right via `tagsBody`; this mirrors it.
+    if (args.description === undefined && args.tags === undefined) {
       return stoppedOut
     }
 
@@ -134,7 +140,7 @@ export const stopTimerTool: ToolDefinition<typeof stopTimerInputShape, typeof ti
         stopped.id,
         omitEmpty({
           description: args.description,
-          ...tagsBody(hasTags ? args.tags : undefined),
+          ...tagsBody(args.tags),
         }),
       )
       return toTimeEntryOut(updated, ctx.timezone)
@@ -373,6 +379,17 @@ export const updateTimeEntryTool: ToolDefinition<typeof updateTimeEntryInputShap
   inputSchema: updateTimeEntryInputShape,
   outputSchema: timeEntryOutputShape,
   handler: async (args, ctx) => {
+    // Open question, unverified against a live ClickUp account: ClickUp's
+    // own "Update a Time Entry" reference page documents `start` as
+    // requiring `end` to be supplied alongside it, but this server has no
+    // way to know an entry's current `end` before writing (there is no
+    // "get one time entry by id" endpoint to read it back first), and this
+    // tool's own input schema only takes `start`/`duration`, not `end`.
+    // Deliberate choice: send exactly the fields the caller gave, via
+    // `omitEmpty`, rather than guessing a plausible `end` and risking a
+    // fabricated value reaching ClickUp. If updating `start` alone (without
+    // `duration`) 400s in practice, that is the sign this assumption is
+    // wrong and `end` needs to be resolved from a prior read instead.
     const body = omitEmpty({
       start: args.start !== undefined ? resolveDate(args.start, { timezone: ctx.timezone }).epochMs : undefined,
       duration: args.duration !== undefined ? parseDuration(args.duration) : undefined,
