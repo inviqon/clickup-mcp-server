@@ -544,3 +544,55 @@ export const GetTimeEntriesResponseSchema = z
     data: z.array(TimeEntrySchema),
   })
   .passthrough()
+
+/**
+ * Docs-domain schemas (Task 16), sourced from ClickUp's v3 OpenAPI
+ * specification (developer.clickup.com/openapi/ClickUp_PUBLIC_API_V3.yaml) -
+ * every other schema in this file backs a v2 endpoint; the v3 Docs API has
+ * its own DTOs (`PublicDocsDocCoreDto`, `PublicDocsPageV3Dto`) that do not
+ * share shape with anything above. Narrowed to the fields this server
+ * actually reads, the same reasoning `SpaceDetailSchema` etc. above apply.
+ *
+ * ClickUp's v3 "Search Docs" endpoint (`GET /v3/workspaces/{teamId}/docs`)
+ * has no free-text query parameter server-side - only `id`, `creator`,
+ * `deleted`, `archived`, `parent_id`, `parent_type`, `limit` and `cursor`.
+ * `clickup_search_docs` (src/tools/docs.ts) matches on `name` client-side
+ * over one page of results; this schema only declares `id` and `name`
+ * because that is all that call reads.
+ */
+export const DocSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+  })
+  .passthrough()
+
+export type Doc = z.infer<typeof DocSchema>
+
+export const SearchDocsResponseSchema = z
+  .object({
+    docs: z.array(DocSchema),
+    next_cursor: z.string().optional(),
+  })
+  .passthrough()
+
+/**
+ * `PublicDocsPageV3Dto`, shared by both `GET .../docs/{docId}/pages` (an
+ * array of these, content included) and `GET .../docs/{docId}/pages/{pageId}`
+ * (one of these). ClickUp's spec marks `content` required and never null on
+ * both, but it is declared optional here anyway per reliability rule 2 -
+ * this server treats a field's presence as something to observe from the
+ * actual response, not assume from what a spec claims.
+ */
+export const DocPageSchema = z
+  .object({
+    id: z.string(),
+    doc_id: z.string(),
+    name: z.string(),
+    content: z.string().optional(),
+  })
+  .passthrough()
+
+export type DocPage = z.infer<typeof DocPageSchema>
+
+export const GetDocPagesResponseSchema = z.array(DocPageSchema)
