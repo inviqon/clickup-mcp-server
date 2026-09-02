@@ -1,0 +1,31 @@
+{
+  "name": "@inviqon/clickup-mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=24" },
+  "bin": {
+    "clickup-mcp": "dist/src/bin/stdio.js",
+    "clickup-mcp-http": "dist/src/bin/http.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "docs:tools": "npm run build && node dist/scripts/generate-tool-docs.js",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/src/bin/stdio.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.0",
+    "msw": "^2.15.0",
+    "typescript": "^7.0.0",
+    "vitest": "^4.1.0"
+  }
+}
