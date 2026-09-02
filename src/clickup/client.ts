@@ -100,6 +100,22 @@ function extractEcode(body: unknown): string | undefined {
   return undefined
 }
 
+/**
+ * ClickUp's error bodies carry their own human-readable message in an `err`
+ * field, for example `{ err: 'Time In Status is not available on your plan',
+ * ECODE: 'ITEM_013' }`. Extracted separately from `extractEcode` and kept on
+ * `ClickUpApiError.clickupMessage` rather than folded into `message`, which
+ * callers and existing tests already rely on carrying this server's own
+ * synthetic text (e.g. `ClickUp API request failed (403)`).
+ */
+function extractErr(body: unknown): string | undefined {
+  if (typeof body === 'object' && body !== null && 'err' in body) {
+    const value = (body as Record<string, unknown>).err
+    return typeof value === 'string' ? value : undefined
+  }
+  return undefined
+}
+
 export class ClickUpClient {
   private readonly token: string
   private readonly limiter: RateLimiter
@@ -152,6 +168,7 @@ export class ClickUpClient {
           status: response.status,
           endpoint,
           ecode: extractEcode(body),
+          clickupMessage: extractErr(body),
           resetAt,
         })
       }
@@ -167,6 +184,7 @@ export class ClickUpClient {
           status: response.status,
           endpoint,
           ecode: extractEcode(body),
+          clickupMessage: extractErr(body),
         })
       }
 
@@ -176,6 +194,7 @@ export class ClickUpClient {
           status: response.status,
           endpoint,
           ecode: extractEcode(body),
+          clickupMessage: extractErr(body),
         })
       }
 

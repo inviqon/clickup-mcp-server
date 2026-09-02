@@ -121,6 +121,51 @@ describe('ClickUpClient', () => {
       .rejects.toMatchObject({ status: 404, ecode: 'ITEM_013' })
   })
 
+  it('raises ClickUpApiError carrying ClickUp\'s own err message on 403', async () => {
+    mswServer.use(http.get('https://api.clickup.com/api/v2/task/1',
+      () => HttpResponse.json({ err: 'Time In Status is not available on your plan' }, { status: 403 })))
+    await expect(client().request({ method: 'GET', path: '/task/1', schema }))
+      .rejects.toMatchObject({ status: 403, clickupMessage: 'Time In Status is not available on your plan' })
+  })
+
+  it('leaves clickupMessage undefined when the error body carries no err field', async () => {
+    mswServer.use(http.get('https://api.clickup.com/api/v2/task/1',
+      () => HttpResponse.json({ ECODE: 'ITEM_013' }, { status: 404 })))
+    const err = await client().request({ method: 'GET', path: '/task/1', schema })
+      .then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(ClickUpApiError)
+    expect((err as ClickUpApiError).clickupMessage).toBeUndefined()
+  })
+
+  it('carries ClickUp\'s own err message on a persistent 429', async () => {
+    mswServer.use(http.get('https://api.clickup.com/api/v2/task/1',
+      () => new HttpResponse(JSON.stringify({ err: 'Rate limit exceeded' }), {
+        status: 429,
+        headers: { 'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 1) },
+      })))
+    const c = new ClickUpClient({
+      token: 'pk_123', maxRetries: 0,
+      limiter: new RateLimiter({ limitPerMinute: 1000, sleep: async () => {} }),
+    })
+    const err = await c.request({ method: 'GET', path: '/task/1', schema })
+      .then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(ClickUpApiError)
+    expect((err as ClickUpApiError).clickupMessage).toBe('Rate limit exceeded')
+  })
+
+  it('carries ClickUp\'s own err message on a persistent 500', async () => {
+    mswServer.use(http.get('https://api.clickup.com/api/v2/task/1',
+      () => HttpResponse.json({ err: 'Internal error' }, { status: 500 })))
+    const c = new ClickUpClient({
+      token: 'pk_123', maxRetries: 0,
+      limiter: new RateLimiter({ limitPerMinute: 1000, sleep: async () => {} }),
+    })
+    const err = await c.request({ method: 'GET', path: '/task/1', schema })
+      .then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(ClickUpApiError)
+    expect((err as ClickUpApiError).clickupMessage).toBe('Internal error')
+  })
+
   it('raises ClickUpSchemaError rather than returning an unvalidated payload', async () => {
     mswServer.use(http.get('https://api.clickup.com/api/v2/task/1',
       () => HttpResponse.json({ id: 42 })))

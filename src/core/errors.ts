@@ -2,12 +2,21 @@ export type ClickUpApiErrorOptions = {
   status: number
   endpoint: string
   ecode?: string | undefined
+  /**
+   * ClickUp's own human-readable explanation, extracted from the `err`
+   * field of the error body (e.g. "Time In Status is not available on your
+   * plan"). Kept separate from `message`, which is this server's own
+   * synthetic string (e.g. "ClickUp API request failed (403)") that callers
+   * and existing tests already rely on.
+   */
+  clickupMessage?: string | undefined
   resetAt?: Date | undefined
 }
 
 export class ClickUpApiError extends Error {
   readonly status: number
   readonly ecode: string | undefined
+  readonly clickupMessage: string | undefined
   readonly endpoint: string
   readonly resetAt: Date | undefined
 
@@ -16,6 +25,7 @@ export class ClickUpApiError extends Error {
     this.name = 'ClickUpApiError'
     this.status = options.status
     this.ecode = options.ecode
+    this.clickupMessage = options.clickupMessage
     this.endpoint = options.endpoint
     this.resetAt = options.resetAt
   }
@@ -71,22 +81,44 @@ function resourceLabel(hint: AgentMessageHint | undefined): string {
   return `${capitalized} ${id}`
 }
 
+/**
+ * ClickUp's own explanation, when it supplied one, formatted to come first
+ * in the agent-facing message - it is the fact, and everything after it in
+ * `apiErrorMessage` is this server's hypothesis about the cause. Empty
+ * string (not a dangling `"ClickUp says: ". `) when ClickUp gave no message,
+ * so the no-message case reads identically to a version of this file with
+ * no knowledge of `clickupMessage` at all: no stray separator, empty quote,
+ * or trailing colon.
+ */
+function clickupMessagePrefix(err: ClickUpApiError): string {
+  return err.clickupMessage !== undefined ? `ClickUp says: "${err.clickupMessage}". ` : ''
+}
+
 function apiErrorMessage(err: ClickUpApiError, hint: AgentMessageHint | undefined): string {
+  const prefix = clickupMessagePrefix(err)
   switch (err.status) {
     case 401:
-      return 'Invalid ClickUp token. Check CLICKUP_API_KEY.'
+      return `${prefix}Invalid ClickUp token. Check CLICKUP_API_KEY.`
     case 403:
-      return `Access denied for ${resourceLabel(hint)}. It may belong to a different workspace than CLICKUP_TEAM_ID. Verify CLICKUP_TEAM_ID matches the workspace that owns this resource.`
+      // A live workspace produced a 403 whose ClickUp message ("Time In
+      // Status is not available on your plan") had nothing to do with
+      // CLICKUP_TEAM_ID - the task was in the configured workspace all
+      // along. So this hint is worded as one possibility among others,
+      // never a diagnosis: the workspace-mismatch story is still worth
+      // checking, but a plan or permission restriction is just as real a
+      // cause, especially when ClickUp's own message (above, if present)
+      // points at that instead.
+      return `${prefix}Access denied for ${resourceLabel(hint)}. This can happen when the resource belongs to a different workspace than CLICKUP_TEAM_ID (worth checking), but it can also be a plan or permission restriction on the ClickUp side that CLICKUP_TEAM_ID would not fix.`
     case 404:
-      return `${resourceLabel(hint)} not found. Use clickup_get_workspace_tree to list valid ${hint?.resource ?? 'resource'} ids.`
+      return `${prefix}${resourceLabel(hint)} not found. Use clickup_get_workspace_tree to list valid ${hint?.resource ?? 'resource'} ids.`
     case 429: {
       if (err.resetAt !== undefined) {
-        return `ClickUp rate limit hit. Retry after ${err.resetAt.toISOString()}.`
+        return `${prefix}ClickUp rate limit hit. Retry after ${err.resetAt.toISOString()}.`
       }
-      return 'ClickUp rate limit hit. Wait a moment and retry.'
+      return `${prefix}ClickUp rate limit hit. Wait a moment and retry.`
     }
     default:
-      return `ClickUp API error (${err.status}) calling ${err.endpoint}: ${err.message}. Retry, or check the ClickUp API status page if this persists.`
+      return `${prefix}ClickUp API error (${err.status}) calling ${err.endpoint}: ${err.message}. Retry, or check the ClickUp API status page if this persists.`
   }
 }
 
