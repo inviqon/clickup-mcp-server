@@ -124,3 +124,41 @@ export function renderTaskTimeInStatus(out: TaskTimeInStatusLike): string {
   }
   return lines.join('\n')
 }
+
+export type TaskTimeInStatusResultLike = {
+  task_id: string
+  current_status?: TimeInStatusPeriodOut | undefined
+  status_history?: TimeInStatusPeriodOut[] | undefined
+  note?: string | undefined
+}
+
+/**
+ * Renders `clickup_get_tasks_time_in_status_bulk` as one compact table, one
+ * row per requested task - the same "aggregate, don't list one bullet per
+ * entry" choice `renderTimeReport` (src/format/time.ts) makes for
+ * `clickup_time_report`. A task whose time in status could not be
+ * determined (see `toTaskTimeInStatusResultOut`,
+ * src/clickup/endpoints/tasks.ts) shows dashes in every numeric column and
+ * its `note` in full - never a blank row that reads as "0m".
+ */
+export function renderTasksTimeInStatusBulk(out: { results: TaskTimeInStatusResultLike[] }): string {
+  const headerCells = ['Task', 'Current status', 'Duration', 'Since', 'History', 'Note']
+  const rows = out.results.map((r) => {
+    if (r.current_status === undefined) {
+      return [r.task_id, '-', '-', '-', '-', r.note ?? '']
+    }
+    const historyLabel =
+      r.status_history !== undefined && r.status_history.length > 0
+        ? `${r.status_history.length} prior status change(s)`
+        : 'no prior status history'
+    return [r.task_id, r.current_status.status, r.current_status.duration, r.current_status.since ?? '-', historyLabel, '']
+  })
+
+  const table = [
+    `| ${headerCells.join(' | ')} |`,
+    `|${headerCells.map(() => '---').join('|')}|`,
+    ...rows.map((r) => `| ${r.join(' | ')} |`),
+  ]
+
+  return [`# Time in status for ${out.results.length} task(s)`, '', ...table].join('\n')
+}

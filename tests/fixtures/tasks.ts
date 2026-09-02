@@ -733,3 +733,54 @@ export function taskTimeInStatusNoHistoryHandlers() {
 export function taskTimeInStatusDisabledClickAppHandlers() {
   return [http.get(`${API}/v2/task/${TASK_ID}/time_in_status`, () => HttpResponse.json({}))]
 }
+
+/**
+ * 101 distinct task ids, so a bulk test can prove chunking splits a
+ * request too large for one call rather than sending an unbounded query
+ * string. 101 is deliberately one past a clean 100-per-chunk split: it is
+ * what proves the chunker rebalances a would-be trailing chunk of exactly
+ * one id (which the bulk endpoint's own "two or more tasks" contract would
+ * reject) into two chunks of 99 and 2, rather than 100 and 1.
+ */
+export const BULK_TIME_IN_STATUS_IDS = Array.from({ length: 101 }, (_, i) => `bulk-${i}`)
+
+/**
+ * GET /v2/task/bulk_time_in_status/task_ids, keyed by task id per ClickUp's
+ * own documented response shape. Records each request's `task_ids` list
+ * into `seen` (in request order) so a test can assert exactly how many
+ * requests were made and how many ids each one carried, without
+ * re-deriving the chunk boundaries itself.
+ *
+ * `opts.shapeless` marks ids ClickUp reports on but without a valid
+ * current_status/status_history shape (mirroring the single-task disabled
+ * -ClickApp case above, at per-task granularity); `opts.omit` marks ids
+ * ClickUp does not mention in the response body at all, e.g. an id it does
+ * not recognise. Every other requested id gets an ordinary, valid entry.
+ */
+export function bulkTimeInStatusHandlers(
+  opts: { seen?: string[][]; shapeless?: string[]; omit?: string[] } = {},
+) {
+  const shapeless = new Set(opts.shapeless ?? [])
+  const omit = new Set(opts.omit ?? [])
+  return [
+    http.get(`${API}/v2/task/bulk_time_in_status/task_ids`, ({ request }) => {
+      const ids = new URL(request.url).searchParams.getAll('task_ids')
+      opts.seen?.push(ids)
+      const body: Record<string, unknown> = {}
+      for (const id of ids) {
+        if (omit.has(id)) {
+          continue
+        }
+        if (shapeless.has(id)) {
+          body[id] = { note: 'this is not a valid time-in-status shape' }
+          continue
+        }
+        body[id] = {
+          current_status: timeInStatusPeriod({ status: 'in progress', byMinute: 30, since: 1757000000000 }),
+          status_history: [],
+        }
+      }
+      return HttpResponse.json(body)
+    }),
+  ]
+}

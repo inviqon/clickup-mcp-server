@@ -5,6 +5,7 @@ import { loadListMeta, type ListMeta } from './workspace.js'
 import { walkTaskPages } from '../pagination.js'
 import type { CommentOut } from '../../format/comment.js'
 import {
+  BulkTimeInStatusRawResponseSchema,
   EmptyResponseSchema,
   GetTaskCommentsResponseSchema,
   GetTasksResponseSchema,
@@ -503,6 +504,94 @@ export async function getTaskTimeInStatusRaw(ctx: ClickUpContext, taskId: string
   }
 }
 
+/**
+ * ClickUp's own reference page for `GET /task/bulk_time_in_status/task_ids`
+ * documents "You can include up to 100 task ids per request." Chosen as
+ * this server's own chunk size, rather than something smaller/arbitrary, so
+ * a caller asking for exactly ClickUp's own limit never gets split into two
+ * requests it did not need.
+ */
+const MAX_BULK_TIME_IN_STATUS_IDS = 100
+
+/**
+ * Splits `taskIds` into chunks of at most `maxPerChunk`, never leaving a
+ * trailing chunk of exactly one id. ClickUp's bulk endpoint is documented
+ * against "two or more tasks" - a naive split (101 ids -> [100, 1]) would
+ * send a final request of one id, which is exactly the case
+ * `clickup_get_task_time_in_status` exists to cover and the bulk endpoint
+ * may not accept. Rebalanced instead: the last two chunks split evenly
+ * (101 -> [99, 2], not [100, 1]).
+ */
+function chunkTaskIds(taskIds: string[], maxPerChunk: number): string[][] {
+  const chunks: string[][] = []
+  for (let i = 0; i < taskIds.length; i += maxPerChunk) {
+    chunks.push(taskIds.slice(i, i + maxPerChunk))
+  }
+  const last = chunks.at(-1)
+  if (chunks.length > 1 && last !== undefined && last.length === 1) {
+    const secondLast = chunks[chunks.length - 2] as string[]
+    const moved = secondLast.pop()
+    if (moved !== undefined) {
+      last.unshift(moved)
+    }
+  }
+  return chunks
+}
+
+/**
+ * One task's outcome from the bulk endpoint: a real, schema-valid result
+ * (`ok`), a per-task shapeless entry (`shapeless` - present in ClickUp's
+ * response but not matching `TaskTimeInStatusResponseSchema`), or an id
+ * ClickUp's response did not mention at all (`missing`). Kept as a tagged
+ * union, and per-task rather than failing the whole call the way the
+ * single-task endpoint above does, because one bad id among many must not
+ * hide real data for the rest of the batch - the same reasoning
+ * `clickup_update_tasks_bulk` (src/tools/tasks.ts) already applies to
+ * writes, applied here to a read.
+ */
+export type TaskTimeInStatusOutcome =
+  | { taskId: string; kind: 'ok'; data: TaskTimeInStatusResponse }
+  | { taskId: string; kind: 'shapeless' }
+  | { taskId: string; kind: 'missing' }
+
+/**
+ * `GET /task/bulk_time_in_status/task_ids`, chunked at
+ * `MAX_BULK_TIME_IN_STATUS_IDS` and walked sequentially so every chunk goes
+ * through `ctx.client.request` - and so the shared rate limiter - exactly
+ * like every other multi-request call in this server (`walkTaskPages`,
+ * `clickup_update_tasks_bulk`'s per-task writes). The raw response is
+ * parsed loosely (`BulkTimeInStatusRawResponseSchema`, one `z.unknown()`
+ * per task) specifically so this function can re-validate each requested
+ * id's own entry individually against the strict
+ * `TaskTimeInStatusResponseSchema` - unlike the single-task function above,
+ * a batch response with one shapeless task must not turn the whole batch
+ * into a thrown error and hide real data for the other ids.
+ */
+export async function getTasksTimeInStatusBulkRaw(
+  ctx: ClickUpContext,
+  taskIds: string[],
+): Promise<Map<string, TaskTimeInStatusOutcome>> {
+  const outcomes = new Map<string, TaskTimeInStatusOutcome>()
+  for (const chunk of chunkTaskIds(taskIds, MAX_BULK_TIME_IN_STATUS_IDS)) {
+    const raw = await ctx.client.request({
+      method: 'GET',
+      path: '/task/bulk_time_in_status/task_ids',
+      schema: BulkTimeInStatusRawResponseSchema,
+      query: { task_ids: chunk },
+    })
+    for (const taskId of chunk) {
+      const entry = raw[taskId]
+      if (entry === undefined) {
+        outcomes.set(taskId, { taskId, kind: 'missing' })
+        continue
+      }
+      const parsed = TaskTimeInStatusResponseSchema.safeParse(entry)
+      outcomes.set(taskId, parsed.success ? { taskId, kind: 'ok', data: parsed.data } : { taskId, kind: 'shapeless' })
+    }
+  }
+  return outcomes
+}
+
 // -- Normalised projections (time in status) ---------------------------------
 
 export type TimeInStatusPeriodOut = {
@@ -552,4 +641,22 @@ export function toTaskTimeInStatusOut(
     current_status: toTimeInStatusPeriodOut(res.current_status, timezone),
     status_history: res.status_history.map((h) => toTimeInStatusPeriodOut(h, timezone)),
   }
+}
+
+/**
+ * The bulk tool's per-task result: either `toTaskTimeInStatusOut`'s own
+ * shape merged with `task_id` (a genuinely successful outcome), or a
+ * `note` naming the task and explaining why time in status could not be
+ * reported for it (`shapeless`/`missing`) - never both, and never a result
+ * with numeric fields silently defaulted to 0.
+ */
+export function toTaskTimeInStatusResultOut(
+  outcome: TaskTimeInStatusOutcome,
+  timezone: string,
+): { task_id: string; current_status?: TimeInStatusPeriodOut; status_history?: TimeInStatusPeriodOut[]; note?: string } {
+  if (outcome.kind === 'ok') {
+    const out = toTaskTimeInStatusOut(outcome.taskId, outcome.data, timezone)
+    return { task_id: out.task_id, current_status: out.current_status, status_history: out.status_history }
+  }
+  return { task_id: outcome.taskId, note: timeInStatusUnavailableMessage(outcome.taskId, outcome.kind) }
 }

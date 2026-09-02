@@ -788,3 +788,70 @@ describe('clickup_get_task_time_in_status', () => {
       )
   })
 })
+
+describe('clickup_get_tasks_time_in_status_bulk', () => {
+  it('rejects fewer than two task ids at the schema level - the single-task tool covers one', () => {
+    const shape = z.object(tool('clickup_get_tasks_time_in_status_bulk').inputSchema)
+    expect(() => shape.parse({ task_ids: ['86abc'] })).toThrow()
+    expect(shape.parse({ task_ids: ['86abc', '86def'] }).task_ids).toEqual(['86abc', '86def'])
+  })
+
+  it('chunks a request above 100 ids rather than sending an unbounded query, rebalancing away from a trailing chunk of one', async () => {
+    const seen: string[][] = []
+    mswServer.use(...fx.bulkTimeInStatusHandlers({ seen }))
+    await tool('clickup_get_tasks_time_in_status_bulk').handler({ task_ids: fx.BULK_TIME_IN_STATUS_IDS }, testContext())
+    // 101 ids: a naive 100/1 split would leave a lone id in a request the
+    // bulk endpoint's own "two or more tasks" contract would not accept -
+    // every chunk sent to ClickUp must itself contain at least two ids.
+    expect(seen).toHaveLength(2)
+    expect(seen.every((chunk) => chunk.length >= 2)).toBe(true)
+    expect(seen.flat().sort()).toEqual([...fx.BULK_TIME_IN_STATUS_IDS].sort())
+  })
+
+  it('converts by_minute to milliseconds for every task in the batch, proven by the formatted duration value', async () => {
+    mswServer.use(...fx.bulkTimeInStatusHandlers())
+    const out = await tool('clickup_get_tasks_time_in_status_bulk').handler(
+      { task_ids: ['86abc', '86def'] },
+      testContext(),
+    )
+    for (const result of out.results) {
+      expect(result.current_status.duration).toBe('30m')
+    }
+  })
+
+  it('reports a task the response omits entirely as an explicit note, not as 0m', async () => {
+    mswServer.use(...fx.bulkTimeInStatusHandlers({ omit: ['86def'] }))
+    const out = await tool('clickup_get_tasks_time_in_status_bulk').handler(
+      { task_ids: ['86abc', '86def'] },
+      testContext(),
+    )
+    const missing = out.results.find((r: { task_id: string }) => r.task_id === '86def')
+    expect(missing.current_status).toBeUndefined()
+    expect(missing.note).toMatch(/86def/)
+  })
+
+  it('reports a task with a shapeless per-task entry as an explicit note naming the ClickApp, not as 0m', async () => {
+    mswServer.use(...fx.bulkTimeInStatusHandlers({ shapeless: ['86def'] }))
+    const out = await tool('clickup_get_tasks_time_in_status_bulk').handler(
+      { task_ids: ['86abc', '86def'] },
+      testContext(),
+    )
+    const shapeless = out.results.find((r: { task_id: string }) => r.task_id === '86def')
+    expect(shapeless.current_status).toBeUndefined()
+    expect(shapeless.note).toMatch(/Total time in Status/)
+    const good = out.results.find((r: { task_id: string }) => r.task_id === '86abc')
+    expect(good.current_status.duration).toBe('30m')
+  })
+
+  it('renders a compact table naming every task, not one bullet per status entry', async () => {
+    mswServer.use(...fx.bulkTimeInStatusHandlers({ omit: ['86def'] }))
+    const out = await tool('clickup_get_tasks_time_in_status_bulk').handler(
+      { task_ids: ['86abc', '86def'] },
+      testContext(),
+    )
+    const md = tool('clickup_get_tasks_time_in_status_bulk').render(out, testContext())
+    expect(md).toContain('86abc')
+    expect(md).toContain('86def')
+    expect(md).toContain('|')
+  })
+})

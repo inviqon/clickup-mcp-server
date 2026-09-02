@@ -12,6 +12,7 @@ import {
   getTaskComments,
   getTaskDetail,
   getTaskTimeInStatusRaw,
+  getTasksTimeInStatusBulkRaw,
   linkTasksRaw,
   listTasksRaw,
   moveTaskHomeList,
@@ -21,13 +22,14 @@ import {
   toTaskOut,
   toTaskSummary,
   toTaskTimeInStatusOut,
+  toTaskTimeInStatusResultOut,
   updateTaskRaw,
   type MoveTaskBody,
 } from '../clickup/endpoints/tasks.js'
 import { TaskSummarySchema, type TaskDetail } from '../clickup/schemas.js'
 import { nameWithId, omitUnset, paginate } from '../format/common.js'
 import { boundPage } from '../clickup/pagination.js'
-import { renderBulkUpdateResult, renderTask, renderTaskTimeInStatus } from '../format/task.js'
+import { renderBulkUpdateResult, renderTask, renderTaskTimeInStatus, renderTasksTimeInStatusBulk } from '../format/task.js'
 import { toCommentOut } from '../format/comment.js'
 import { assertConfirmName } from './confirm.js'
 
@@ -842,6 +844,73 @@ export const getTaskTimeInStatusTool: ToolDefinition<
   render: (out) => renderTaskTimeInStatus(out),
 }
 
+// ---------------------------------------------------------------------------
+// clickup_get_tasks_time_in_status_bulk
+// ---------------------------------------------------------------------------
+
+/**
+ * `min(2)` mirrors ClickUp's own "two or more tasks" contract for this
+ * endpoint - one task belongs to `clickup_get_task_time_in_status` instead.
+ * `max(500)` is this server's own overall-request cap, not ClickUp's (whose
+ * only documented limit is per-upstream-request: "up to 100 task ids", the
+ * `MAX_BULK_TIME_IN_STATUS_IDS` chunk size `getTasksTimeInStatusBulkRaw`
+ * chunks at). 500 mirrors `walkTaskPages`'s own hard cap
+ * (src/clickup/pagination.ts) - a sane upper bound on how much one call
+ * should fan out into upstream requests (5 chunks of 100), not a limit
+ * ClickUp itself imposes.
+ */
+const getTasksTimeInStatusBulkInputShape = {
+  task_ids: z
+    .array(z.string())
+    .min(2)
+    .max(500)
+    .describe('Two or more task ids - use clickup_get_task_time_in_status for a single task'),
+}
+
+const taskTimeInStatusResultOutputShape = {
+  task_id: z.string(),
+  current_status: z.object(timeInStatusPeriodOutputShape).optional(),
+  status_history: z.array(z.object(timeInStatusPeriodOutputShape)).optional(),
+  note: z.string().optional(),
+}
+
+const tasksTimeInStatusBulkOutputShape = {
+  results: z.array(z.object(taskTimeInStatusResultOutputShape)),
+}
+
+export const getTasksTimeInStatusBulkTool: ToolDefinition<
+  typeof getTasksTimeInStatusBulkInputShape,
+  typeof tasksTimeInStatusBulkOutputShape
+> = {
+  name: 'clickup_get_tasks_time_in_status_bulk',
+  title: 'Get ClickUp Tasks Time In Status (Bulk)',
+  category: 'tasks',
+  mode: 'read',
+  description: [
+    'Time in status for two or more tasks in one call - one result per requested task_id, same order.',
+    'Requests are chunked at 100 ids per upstream call (ClickUp\'s own documented limit for this',
+    'endpoint), each one going through the shared rate limiter, so a large batch never sends one',
+    'unbounded request. Requires the "Total time in Status" ClickApp to be enabled for this workspace.',
+    'A task this server cannot report on - ClickUp\'s response omitted it, or did not carry the expected',
+    'shape for it - gets an explicit note naming that ClickApp rather than a confident "0m"; this project',
+    'could not verify what ClickUp actually returns when that ClickApp is disabled, so the note says',
+    '"cannot tell", not a firm diagnosis. One bad id never hides real data for the rest of the batch.',
+    'Examples: "how long has each of these 20 tasks been in its current status",',
+    '"compare cycle time across task 86abc, 86def and 86ghi".',
+  ].join(' '),
+  inputSchema: getTasksTimeInStatusBulkInputShape,
+  outputSchema: tasksTimeInStatusBulkOutputShape,
+  handler: async (args, ctx) => {
+    const outcomes = await getTasksTimeInStatusBulkRaw(ctx, args.task_ids)
+    const results = args.task_ids.map((taskId) => {
+      const outcome = outcomes.get(taskId) ?? ({ taskId, kind: 'missing' } as const)
+      return toTaskTimeInStatusResultOut(outcome, ctx.timezone)
+    })
+    return { results }
+  },
+  render: (out) => renderTasksTimeInStatusBulk(out),
+}
+
 export const TASK_TOOLS: AnyToolDefinition[] = [
   getTaskTool,
   listTasksTool,
@@ -852,4 +921,5 @@ export const TASK_TOOLS: AnyToolDefinition[] = [
   deleteTaskTool,
   linkTasksTool,
   getTaskTimeInStatusTool,
+  getTasksTimeInStatusBulkTool,
 ] as unknown as AnyToolDefinition[]

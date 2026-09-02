@@ -473,6 +473,20 @@ export const TaskTimeInStatusResponseSchema = z
 export type TaskTimeInStatusResponse = z.infer<typeof TaskTimeInStatusResponseSchema>
 
 /**
+ * `GET /task/bulk_time_in_status/task_ids`'s own response shape: an object
+ * keyed by task id, not an array - each value the same shape
+ * `TaskTimeInStatusResponseSchema` describes for one task. Deliberately
+ * loose (`z.unknown()` per value) at the client-request boundary: unlike
+ * every other schema in this file, a single malformed entry here must not
+ * fail the whole batch the way `z.record(TaskTimeInStatusResponseSchema)`
+ * would - `getTasksTimeInStatusBulkRaw` re-validates each entry individually
+ * against `TaskTimeInStatusResponseSchema` afterward, so one shapeless task
+ * among many produces one explicit per-task note, not a batch-wide failure.
+ */
+export const BulkTimeInStatusRawResponseSchema = z.record(z.string(), z.unknown())
+export type BulkTimeInStatusRawResponse = z.infer<typeof BulkTimeInStatusRawResponseSchema>
+
+/**
  * `POST /v2/task/{task_id}/comment`'s own response - a minimal
  * acknowledgement (id, hist_id, date), not a full comment object, unlike
  * `TaskCommentSchema` above which backs both places this server actually
