@@ -197,7 +197,13 @@ function zonedYmd(epochMs: number, timezone: string): { year: number; month: num
     day: '2-digit',
   })
   const parts = formatter.formatToParts(new Date(epochMs))
-  const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value)
+  const get = (type: string): number => {
+    const part = parts.find((p) => p.type === type)
+    if (part === undefined) {
+      throw new Error(`Could not read "${type}" for timezone "${timezone}"`)
+    }
+    return Number(part.value)
+  }
   return { year: get('year'), month: get('month'), day: get('day') }
 }
 

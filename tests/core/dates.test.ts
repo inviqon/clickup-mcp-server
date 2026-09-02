@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { formatDate, parseDuration, resolveDate } from '../../src/core/dates.js'
 
 const tz = 'Europe/Berlin'
@@ -177,6 +177,22 @@ describe('resolveDate', () => {
     const januaryNow = new Date('2026-01-14T09:00:00Z') // Berlin winter time, a Wednesday
     expect(resolveDate('today', { timezone: tz, now: januaryNow }).iso)
       .toBe('2026-01-14T00:00:00+01:00')
+  })
+
+  it('throws, rather than silently computing NaN, when Intl omits a date part "today" needs', () => {
+    // "today" resolves through the internal zonedYmd() helper, which reads
+    // year/month/day out of Intl.DateTimeFormat parts. Its two sibling
+    // helpers (offsetMinutesAt, zonedDateTimeParts) already throw when a
+    // requested part is missing; zonedYmd must match, not return NaN.
+    const spy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'formatToParts')
+      .mockReturnValue([{ type: 'year', value: '2026' } as Intl.DateTimeFormatPart])
+    try {
+      expect(() => resolveDate('today', { timezone: tz, now }))
+        .toThrow(/Could not read "month" for timezone "Europe\/Berlin"/)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 
