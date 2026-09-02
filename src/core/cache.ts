@@ -84,9 +84,4 @@ export class TtlCache {
       }
     }
   }
-
-  clear(): void {
-    this.entries.clear()
-    this.inflight.clear()
-  }
 }

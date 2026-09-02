@@ -36,7 +36,7 @@ type TenantEntry = {
  * first place: `createContext` builds a brand new `TtlCache` and
  * `RateLimiter` on every call (Task 8), and `contextFor` calls it exactly
  * once per distinct `credentialKey`, caching the result in `contexts`. There
- * is deliberately no use of `TtlCache.clear()` anywhere in this class - a
+ * is deliberately no bulk-clear of a `TtlCache` anywhere in this class - a
  * second tenant is never handed the first tenant's cache to begin with, so
  * there is nothing to clear.
  *
