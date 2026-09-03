@@ -1,62 +1,88 @@
 # @inviqon/clickup-mcp-server
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D24-brightgreen)](package.json)
+
 A self-hosted [Model Context Protocol](https://modelcontextprotocol.io) server
-for [ClickUp](https://clickup.com), built for one concrete job: an agent doing
-daily task management - planning, updating, commenting, tracking time - without
-falling back to the ClickUp web UI.
+for [ClickUp](https://clickup.com). It gives an agent the tools to run a real
+working day in ClickUp - planning, updating, commenting, tracking time -
+without falling back to the web UI. Built for anyone who wants their agent
+talking to ClickUp under their own token and their own rate limit, not a
+shared vendor-hosted one.
 
-It exists for two reasons:
+## Why it exists
 
-- **Rate limits are per API token, not per workspace.** Running your own
-  server with client-side throttling and caching keeps a session inside the
-  plan tier's limit instead of competing with a shared vendor-hosted server.
-- **Tool surface and response shape are ours to tune.** 37 tools, chosen and
-  shaped for what a daily-task-management agent actually needs, not a 1:1
-  wrapper around every ClickUp endpoint. Responses are compact markdown by
-  default (JSON on request), empty and null fields are omitted, and every
-  list response carries the same `total` / `count` / `offset` / `has_more`
-  envelope - all of it aimed at using fewer tokens per session than issuing
-  the equivalent raw API calls would.
+Two reasons, in order of how much they actually bite:
 
-It runs two ways from one codebase, with no rewrite between them: locally over
-stdio for a single user, or as a remote Streamable HTTP connector serving
-multiple tenants at once, each isolated by their own ClickUp credentials.
+1. **Rate limits are enforced per API token, not per workspace.** The
+   established hosted ClickUp MCP option moved to a paid tier with a hard
+   cap of 100 requests per 24 hours. Self-hosting this server means your
+   agent runs against your own ClickUp plan's own limit - by default,
+   [100 requests per minute](#configuration), not 100 requests a day shared
+   across every user of someone else's server.
+2. **Tool surface and response shape are yours to shape.** 40 tools, chosen
+   and shaped for daily task management, not a 1:1 wrapper around every
+   ClickUp endpoint. What a tool returns, and how compactly, matters more
+   for an agent's reliability than how many endpoints are covered - see
+   below.
 
-See [`docs/TOOLS.md`](docs/TOOLS.md) for the full generated tool reference,
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how the server is built and
-why, and [`docs/RELIABILITY.md`](docs/RELIABILITY.md) for the reliability
-rules every tool is held to and the tests that enforce them.
+It runs two ways from one codebase, with no rewrite between them: locally
+over stdio for a single user, or as a remote Streamable HTTP connector
+serving multiple tenants at once, each isolated by their own ClickUp
+credentials.
 
-## What this is not
+## What makes it different
 
-Out of scope for this version, all addable later without a structural change:
-chat channels and messages, webhooks, guests and user groups, goals/OKRs,
-views, audit logs, task and list templates, attachment upload, checklists
-(subtasks cover the same need), and Docs *writing* - Docs are read-only here.
-There is no OAuth2 authorisation code flow either: authentication is by
-personal API token only.
+Most MCP servers wrap an API. This one is built around a rule that most
+tool-calling agents quietly violate under pressure: **never present a guess
+as a fact.** Every response this server produces follows the same handful of
+rules, and every rule has a named test enforcing it - see
+[`docs/RELIABILITY.md`](docs/RELIABILITY.md) for the full list of nine, each
+linked to the test file and title that checks it.
+
+The two most concrete ones:
+
+- **A missing value is omitted, never guessed at.** No `null`, no `"N/A"`,
+  no invented `0`. Take `clickup_time_report`: asked for a specific member's
+  logged hours, a token that cannot see that member's entries (or a member
+  who genuinely logged nothing) does not come back as `0h` - a bare `0h`
+  would be indistinguishable from "worked zero hours" to anyone reading the
+  report, and one of those is a fact while the other is an artifact of
+  permissions. Instead the response states the ambiguity explicitly: nothing
+  tracked, or this token cannot see it - it is not established which.
+- **Ambiguity is surfaced, not resolved.** `clickup_resolve_member("Tiemo")`
+  against a workspace with two people named Tiemo returns both candidates
+  with their emails, rather than silently picking one and hoping. Silently
+  narrowing to a guess is exactly the kind of thing that looks fine in a
+  demo and corrupts a real session.
+
+The same discipline runs through the rest: an upstream error (401, 403, 404,
+429) always produces a specific message with a next step, never something
+that reads like "nothing found"; a bounded list result (paged out, or capped
+by ClickUp's own API limits) says explicitly that it is bounded and how to
+get the rest; every id in a response is copied verbatim from ClickUp, never
+reconstructed; every resolved date is echoed back with its timezone offset,
+so a timezone mistake is visible instead of silent.
 
 ## Install
 
-This package is not published to a registry yet; run it from source.
+Requires Node.js 24 or newer. Not published to a package registry yet - run
+it from source:
 
 ```bash
-git clone <this repository>
-cd click-up-mcp
+git clone https://github.com/inviqon/clickup-mcp-server.git
+cd clickup-mcp-server
 npm install
 npm run build
 ```
 
-The build produces `dist/src/bin/stdio.js` and `dist/src/bin/http.js`, the two
-entry points referenced below. `npm link` (or a global `npm install -g .`)
-puts the `clickup-mcp` and `clickup-mcp-http` commands on your `PATH`, which
-is what the client configuration examples below assume; substitute
-`node /absolute/path/to/click-up-mcp/dist/src/bin/stdio.js` wherever you see
-`clickup-mcp` if you would rather not link it.
+The build produces `dist/src/bin/stdio.js` and `dist/src/bin/http.js`.
+`npm link` (or `npm install -g .`) puts `clickup-mcp` and `clickup-mcp-http`
+on your `PATH`, which is what the examples below assume; substitute
+`node /absolute/path/to/clickup-mcp-server/dist/src/bin/stdio.js` wherever
+you see `clickup-mcp` if you would rather not link it.
 
-Requires Node.js 24 or newer.
-
-## Configuration
+## Configure
 
 All configuration is environment variables, read once at startup by
 `loadConfig` (`src/core/config.ts`). See [`.env.example`](.env.example) for a
@@ -66,31 +92,33 @@ copy-pasteable template.
 |---|---|---|
 | `CLICKUP_API_KEY` | required (stdio); may be empty (HTTP) | ClickUp personal API token (`pk_...`). The stdio transport refuses to start without one, and additionally probes `GET /v2/user` at startup so a token ClickUp rejects fails immediately, naming this variable, rather than surfacing as an opaque 401 on whichever tool is called first. The HTTP transport allows an empty value here because it resolves the token per request from the `Authorization` header instead - see [HTTP transport](#http-transport-streamable-http) below. |
 | `CLICKUP_TEAM_ID` | required | ClickUp workspace (team) id. The HTTP transport lets a request override this per call via an `X-ClickUp-Team-Id` header. |
-| `CLICKUP_MCP_MODE` | `write` | `read`, `write` or `admin`. Controls which tools this server instance advertises: `write` exposes read and write tools but never admin (destructive) ones; `admin` exposes everything. See [Tool reference](#tool-reference). |
+| `CLICKUP_MCP_MODE` | `write` | `read`, `write` or `admin`. Controls which tools this server instance advertises: `write` exposes read and write tools but never admin (destructive) ones; `admin` exposes everything. See [The tool surface](#the-tool-surface) and [`SECURITY.md`](SECURITY.md). |
 | `CLICKUP_ENABLED_CATEGORIES` | all categories | Comma separated category filter. Valid values: `navigation`, `tasks`, `comments`, `structure`, `tags`, `time`, `docs`, `daily`. Leave unset to enable every category. |
 | `CLICKUP_DISABLED_TOOLS` | none | Comma separated explicit tool name blocklist, e.g. `clickup_delete_task,clickup_delete_space`. Applied after the mode and category filters, so it can remove a tool those two would otherwise admit. |
 | `CLICKUP_TIMEZONE` | the host's system timezone | IANA timezone (e.g. `Europe/Berlin`) used to resolve natural-language dates (`"tomorrow 17:00"`) and to render every date this server returns, so a mismatch between what you meant and what was resolved is visible rather than silent. |
 | `CLICKUP_CACHE_TTL_SECONDS` | `300` | How long the cached workspace tree and per-list metadata (statuses, custom fields) stay fresh before the next read re-fetches them. |
 | `CLICKUP_RATE_LIMIT` | `100` | Requests per minute the client-side token-bucket limiter allows, plan dependent - keeps this server's own calls inside your ClickUp plan tier's limit rather than relying on ClickUp's 429 responses alone. |
-| `CLICKUP_MAX_RESPONSE_CHARS` | `40000` | Character budget enforced on both the rendered text and the `structuredContent` of every tool response. A response over budget drops whole items from the end - the rendered text appends a notice naming how many were dropped and the `offset` that fetches them; `structuredContent` gains `bounded: true`, the same field `clickup_list_tasks` and `clickup_get_my_day` already use for a bounded result. A response with no item list (a single task, a doc page) cannot be item-truncated and is left whole - see [Security and known limits](#security-and-known-limits). |
+| `CLICKUP_MAX_RESPONSE_CHARS` | `40000` | Character budget enforced on both the rendered text and the `structuredContent` of every tool response. A response over budget drops whole items from the end - the rendered text appends a notice naming how many were dropped and the `offset` that fetches them; `structuredContent` gains `bounded: true`. A response with no item list (a single task, a doc page) cannot be item-truncated and is left whole - see [Known limits](#known-limits). |
 | `CLICKUP_HTTP_PORT` | `3000` | HTTP transport only: port to listen on. |
-| `CLICKUP_HTTP_HOST` | `127.0.0.1` | HTTP transport only: host to bind to. Binding anywhere other than loopback is a deliberate choice - see [Security](#security-and-known-limits). |
+| `CLICKUP_HTTP_HOST` | `127.0.0.1` | HTTP transport only: host to bind to. Binding anywhere other than loopback is a deliberate choice with consequences - see [`SECURITY.md`](SECURITY.md). |
 | `CLICKUP_ALLOWED_ORIGINS` | none | HTTP transport only: comma separated list of `Origin` header values to accept. A request with no `Origin` header at all is always allowed (non-browser MCP clients never send one); a request that *does* carry an `Origin` is rejected unless it is in this list. |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. Gates the startup readiness line each transport writes to stderr (`src/core/logger.ts`): a message is written when its level is at or above `LOG_LEVEL`, so `LOG_LEVEL=warn` or `error` suppresses the readiness line while the default `info` and `debug` both keep it. This server never writes to stdout (`console.log` is forbidden under `src/`), and it has no other log lines yet - this is the one thing `LOG_LEVEL` currently controls. |
-
-## Client configuration
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. Gates the startup readiness line each transport writes to stderr. This server never writes to stdout (`console.log` is forbidden under `src/`, since stdout is the stdio transport's own protocol channel), and it has no other log lines yet - this is the one thing `LOG_LEVEL` currently controls. |
 
 ### Claude Code (stdio)
 
 ```bash
-claude mcp add clickup \
+claude mcp add clickup --scope user \
   --env CLICKUP_API_KEY=pk_your_token_here \
   --env CLICKUP_TEAM_ID=9007123456 \
   -- clickup-mcp
 ```
 
-Add any other variable from the table above with additional `--env` flags,
-for example `--env CLICKUP_MCP_MODE=admin` to enable the destructive tools.
+Use `--scope user`, not `--scope project`. Project scope writes the command
+(including any `--env` values on it) into a config file meant to be checked
+into the repository - your ClickUp token has no business sitting in git
+history. Add any other variable from the table above with additional `--env`
+flags, for example `--env CLICKUP_MCP_MODE=admin` to enable the destructive
+tools.
 
 ### Claude Desktop (stdio)
 
@@ -111,14 +139,15 @@ Add an entry to Claude Desktop's `claude_desktop_config.json`:
 ```
 
 If you did not `npm link` the package, replace `"command": "clickup-mcp"`
-with `"command": "node", "args": ["/absolute/path/to/click-up-mcp/dist/src/bin/stdio.js"]`.
+with `"command": "node", "args": ["/absolute/path/to/clickup-mcp-server/dist/src/bin/stdio.js"]`.
 
 ### HTTP transport (Streamable HTTP)
 
 For a remote, multi-tenant deployment. Each request carries its own
 credentials, so one running server instance can serve many ClickUp accounts
-at once without any of them sharing a cache or rate limiter
-(`src/http/tenant-store.ts` keys a context per token+team pair).
+at once without any of them sharing a cache or rate limiter - see
+[`SECURITY.md`](SECURITY.md) for what this transport does and does not
+protect against, in particular before binding it to anything but loopback.
 
 Start it:
 
@@ -127,25 +156,21 @@ CLICKUP_TEAM_ID=9007123456 clickup-mcp-http
 # clickup-mcp-http ready: listening on 127.0.0.1:3000, mode=write
 ```
 
-`CLICKUP_API_KEY` may be left empty here - see the security note below - and
-every request must then supply its own credentials as headers against the
-single route, `POST /mcp`:
+`CLICKUP_API_KEY` may be left empty here, and every request must then supply
+its own credentials as headers against the single route, `POST /mcp`:
 
-There is deliberately **no startup token probe on this transport**, unlike
-stdio. Each request resolves its own token, so the equivalent check would be
-a `GET /v2/user` round trip added to every single tool call, to re-learn
-something the call's own first upstream request reports anyway. A bad token
-here surfaces as ClickUp's own 401, mapped to a hint naming
-`CLICKUP_API_KEY` as worth checking (see `src/core/errors.ts` for the exact
-wording - a 401 can also mean the token could not resolve the requested
-resource, not that the token itself is bad), on the first tool the client
-calls.
-
-- `Authorization: <token>` or `Authorization: Bearer <token>` (both accepted;
-  the `Bearer ` prefix, if present, is stripped before the token is sent to
-  ClickUp). Falls back to `CLICKUP_API_KEY` when the header is absent.
+- `Authorization: <token>` or `Authorization: Bearer <token>` (both
+  accepted; the `Bearer ` prefix, if present, is stripped before the token
+  is sent to ClickUp). Falls back to `CLICKUP_API_KEY` when the header is
+  absent.
 - `X-ClickUp-Team-Id: <team id>` (optional). Falls back to `CLICKUP_TEAM_ID`
   when absent.
+
+There is deliberately no startup token probe on this transport, unlike
+stdio - each request resolves its own token, so the equivalent check would
+add a `GET /v2/user` round trip to every single tool call. A bad token here
+surfaces as ClickUp's own 401, mapped to a hint naming `CLICKUP_API_KEY` as
+worth checking, on the first tool the client calls.
 
 A generic Streamable HTTP MCP client configuration looks like:
 
@@ -164,39 +189,45 @@ A generic Streamable HTTP MCP client configuration looks like:
 }
 ```
 
-## Tool reference
+## The tool surface
 
-37 tools across 8 categories: navigation (5), tasks (8), comments (3),
-structure (9), tags (2), time tracking (7), docs (2, read-only), daily (1).
+40 tools across 8 categories:
+
+| Category | Count | Covers |
+|---|---|---|
+| Navigation | 5 | Workspace tree, list details, member lookup, task search |
+| Tasks | 10 | Get, list, create, update, bulk update, move, delete, link, time in status (single + bulk) |
+| Comments | 3 | List, create, update |
+| Structure | 9 | Create/update/delete for spaces, folders, lists |
+| Tags | 2 | List space tags, set a task's tags |
+| Time tracking | 8 | Start/stop/current timer, list/create/update/delete entries, time report |
+| Docs | 2 | Search docs, read a doc (read-only) |
+| Daily | 1 | `clickup_get_my_day` - the day's opening "catch me up" in one call |
+
 Every tool is one of three modes, which double as its MCP annotations
 (`annotationsFor`, `src/core/registry.ts`):
 
 - **read** - `readOnlyHint: true`, always visible.
 - **write** - visible in `write` and `admin` mode.
 - **admin** - destructive (`destructiveHint: true`), visible only in
-  `CLICKUP_MCP_MODE=admin`.
+  `CLICKUP_MCP_MODE=admin`. See [`SECURITY.md`](SECURITY.md) for the guard
+  each delete tool applies before it will touch anything.
 
-Four of the five admin delete tools - `clickup_delete_task`,
-`clickup_delete_space`, `clickup_delete_folder` and `clickup_delete_list` -
-additionally require a `confirm_name` argument that must match the entity's
-current name, read fresh at call time; the DELETE is never reached on a
-mismatch, so a stale or guessed id cannot destroy the wrong thing. The fifth,
-`clickup_delete_time_entry`, has no such guard: a ClickUp time entry has no
-name to confirm against. There is nothing to type back, so requiring a
-confirmation string there would be theatre rather than a check - identify the
-entry with `clickup_list_time_entries` before deleting it.
+The full reference - every tool's input parameters, output fields and
+annotations, generated straight from the code - is at
+[`docs/TOOLS.md`](docs/TOOLS.md). Run `npm run docs:tools` to regenerate it
+after any change to a tool's shape or description; `tests/docs.test.ts`
+fails the build if it drifts.
 
-The full list, with input parameters, output fields and annotations for each
-tool, is generated straight from the code at
-[`docs/TOOLS.md`](docs/TOOLS.md) - run `npm run docs:tools` to regenerate it
-after any change to a tool's shape or description.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how the server is
+layered and why.
 
 ## Worked examples
 
-These are real tool call sequences, with real tool names and the arguments
-those tools actually accept (see [`docs/TOOLS.md`](docs/TOOLS.md) to check
-any of them). Every example assumes `response_format` is left at its default,
-`markdown`.
+Real tool call sequences, with real tool names and the arguments those tools
+actually accept (check any of them against
+[`docs/TOOLS.md`](docs/TOOLS.md)). Every example assumes `response_format`
+is left at its default, `markdown`.
 
 ### 1. Start a timer on a task found by search
 
@@ -215,8 +246,9 @@ clickup_start_timer({
 ```
 
 `clickup_start_timer` checks for an already-running timer first and refuses
-to start a new one if it finds one, because ClickUp silently stops (and loses
-the tracked time on) whatever was running the moment a new timer starts.
+to start a new one if it finds one, because ClickUp silently stops (and
+loses the tracked time on) whatever was running the moment a new timer
+starts.
 
 ### 2. Create a task with a due date and a custom field
 
@@ -239,11 +271,12 @@ clickup_create_task({
 })
 ```
 
-`due_date` accepts natural language or ISO; the response echoes the resolved
-due date with its timezone offset, so a timezone mistake is visible rather
-than silent. `custom_fields` is keyed by the field's *name*, not its id - the
-server resolves the name against the list's own field definitions and rejects
-an unknown one by naming the fields that do exist, before writing anything.
+`due_date` accepts natural language or ISO; the response echoes the
+resolved due date with its timezone offset, so a timezone mistake is
+visible rather than silent. `custom_fields` is keyed by the field's *name*,
+not its id - the server resolves the name against the list's own field
+definitions and rejects an unknown one by naming the fields that do exist,
+before writing anything.
 
 ### 3. Review the day
 
@@ -251,33 +284,23 @@ an unknown one by naming the fields that do exist, before writing anything.
 clickup_get_my_day({})
 ```
 
-One call returns the currently running timer (if any), time already tracked
-today, tasks due today, and overdue tasks - all for the authenticated user.
-It composes four existing reads rather than adding new API surface, and is
-meant to be the first call of a session: if any one of the four pieces fails,
-the other three still render, with the failed one named explicitly rather
-than silently missing. Pass `{ date: "tomorrow" }` (or any date `resolveDate`
-accepts) to preview a different day instead of today.
+One call returns the currently running timer (if any), time already
+tracked today, tasks due today, and overdue tasks - all for the
+authenticated user. It composes four existing reads rather than adding new
+API surface, and is meant to be the first call of a session: if any one of
+the four pieces fails, the other three still render, with the failed one
+named explicitly rather than silently missing. Pass `{ date: "tomorrow" }`
+(or any date `resolveDate` accepts) to preview a different day instead of
+today.
 
-## Security and known limits
+## Known limits
 
-- **The HTTP transport binds to `127.0.0.1` by default and validates
-  `Origin`.** A request that carries an `Origin` header not in
-  `CLICKUP_ALLOWED_ORIGINS` is rejected with 403; a request with no `Origin`
-  at all (the normal case for a non-browser MCP client) is always allowed.
-  This is a DNS-rebinding defence for the common case of a locally bound
-  server, not a substitute for real authentication - setting
-  `CLICKUP_HTTP_HOST` to bind beyond loopback and expose this server on a
-  network is a deliberate act with consequences: `resolveToken` accepts any
-  non-empty `Authorization` header value before ClickUp itself ever validates
-  it, so a caller who can merely reach the port can force a `ClickUpContext`
-  to be built (and cached, up to a bound) for any token they choose, valid or
-  not. Put this behind your own network controls (a reverse proxy with real
-  auth, a VPN, a firewall) before binding it anywhere but loopback.
-- **`clickup_search_docs` only sees the workspace's first 100 docs.** ClickUp's
-  Docs v3 API has no free-text filter, so this tool lists docs and matches
-  locally; a workspace with more than 100 docs can have a match this search
-  never reaches. The tool's response says so explicitly (`bounded: true`)
+- **Docs are read-only in v1.** There is no tool to create or edit a Doc or
+  a Doc page.
+- **`clickup_search_docs` only sees the workspace's first 100 docs.**
+  ClickUp's Docs v3 API has no free-text filter, so this tool lists docs and
+  matches locally; a workspace with more than 100 docs can have a match this
+  search never reaches. The response says so explicitly (`bounded: true`)
   when the cap is hit.
 - **`clickup_list_tasks` and `clickup_search_tasks` walk at most 5 upstream
   pages (500 tasks)** before giving up and reporting what they found so far,
@@ -285,33 +308,63 @@ accepts) to preview a different day instead of today.
   confirmed the end of the result set. Narrow the query (a list or space id,
   more specific filters) to search a smaller pool and get a result that is
   not just a probable answer.
-- **The character budget bounds both the rendered text and `structuredContent`,
-  at item granularity.** `CLICKUP_MAX_RESPONSE_CHARS` caps the markdown (or
-  JSON) text view of a response and the `structuredContent` field a client
-  reads directly; an over-budget response drops whole items from the end of
-  either, never a raw byte cut, so `structuredContent` always stays valid
-  against the tool's own `outputSchema` - the dropped-item notice appears in
-  the rendered text, and `bounded: true` appears in `structuredContent`
-  itself. A response with no item list (a single task, a doc page) has
-  nothing to drop and is left whole even when it exceeds the budget - only
-  the rendered text falls back to a character cut in that case. Use `limit`
-  and `offset` to bound the actual result size when that matters.
-- **Docs are read-only in this version.** There is no tool to create or edit
-  a Doc or a Doc page.
-- **Chat, webhooks, goals, views, guests, user groups, audit logs, templates,
-  attachment upload and checklists are out of scope for this version** (see
-  [What this is not](#what-this-is-not)).
+- **Chat, webhooks, goals, views, guests, user groups, audit logs,
+  templates, attachment upload and checklists are out of scope for this
+  version**, all addable later without a structural change. There is no
+  OAuth2 authorisation code flow either - authentication is by personal API
+  token only.
+- **Time-in-status needs a ClickUp plan that includes it.**
+  `clickup_get_task_time_in_status` and its bulk counterpart call an
+  endpoint ClickUp rejects outright ("Time In Status is not available on
+  your plan") on plans that lack the "Total time in Status" feature, rather
+  than returning zeros.
 - **`clickup_update_time_entry`'s request contract for a partial
-  `start`-or-`duration` update is unverified against a live ClickUp account.**
-  ClickUp's own "Update a Time Entry" reference documents `start` as requiring
-  `end` alongside it, but there is no "get one time entry by id" endpoint to
-  read an entry's current `end` back before writing, and this tool's schema
-  only accepts `start`/`duration`. It sends exactly the fields you pass,
-  rather than fabricating a plausible `end`. If updating `start` alone 400s
-  in practice against your workspace, that is the sign this assumption needs
-  revisiting - see the comment inside `updateTimeEntryTool`'s handler in
-  `src/tools/time.ts`.
+  `start`-or-`duration` update is unverified against a live ClickUp
+  account.** ClickUp's own "Update a Time Entry" reference documents `start`
+  as requiring `end` alongside it, but there is no "get one time entry by
+  id" endpoint to read an entry's current `end` back before writing, and
+  this tool's schema only accepts `start`/`duration`. It sends exactly the
+  fields you pass, rather than fabricating a plausible `end`. If updating
+  `start` alone 400s in practice against your workspace, that is the sign
+  this assumption needs revisiting - see the comment inside
+  `updateTimeEntryTool`'s handler in `src/tools/time.ts`.
+
+See [`SECURITY.md`](SECURITY.md) for the HTTP transport's posture, tenant
+isolation, and the three access modes.
 
 ## Development
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+```bash
+npm install
+npm run typecheck          # tsc --noEmit over src/, scripts/ and tests/
+npx vitest run              # the test suite
+npx vitest run --coverage   # with the coverage report
+npm run build                 # tsc, emits dist/
+npm run docs:tools           # build, then regenerate docs/TOOLS.md from ALL_TOOLS
+```
+
+`docs/TOOLS.md` is generated, not hand-maintained - `tests/docs.test.ts`
+asserts it matches `renderToolDocs(ALL_TOOLS)` byte for byte, so a tool
+changed without regenerating the docs fails the test suite rather than
+silently going stale. Coverage thresholds (statements 80, branches 75,
+functions 80, lines 80) are enforced in aggregate over `src/**/*.ts`, not
+per file.
+
+There is also a ten-question evaluation set
+(`evals/clickup-daily.template.xml`) that checks whether an agent connected
+to this server, given only its tools, can navigate a real ClickUp workspace
+to a correct answer - a small, human-legible check on end-to-end tool
+usability that the unit and integration tests under `tests/` cannot cover
+themselves. The filled set names real workspace data and is deliberately
+not committed; see [`evals/README.md`](evals/README.md) for how to build
+and run your own against a workspace you control.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow, including
+how to add a new tool.
+
+## Licence and contributing
+
+MIT licensed - see [`LICENSE`](LICENSE). Contributions welcome; see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow, and
+[`SECURITY.md`](SECURITY.md) to report a vulnerability privately rather than
+through a public issue.
