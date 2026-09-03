@@ -173,6 +173,20 @@ describe('ClickUpClient', () => {
       .rejects.toBeInstanceOf(ClickUpSchemaError)
   })
 
+  // Smaller issue 5: a top-level (path-less) schema issue used to render as
+  // the bare, meaningless literal "(root)" - the path alone, with zod's own
+  // explanation of what was wrong discarded entirely. Observed live wrapped
+  // inside clickup_stop_timer's own error (Bug 3): "... failed schema
+  // validation for PUT ...: (root)" and nothing else.
+  it('names what was actually wrong for a path-less schema issue, not the bare literal "(root)"', async () => {
+    mswServer.use(http.get('https://api.clickup.com/api/v2/task/1', () => HttpResponse.json('just a string')))
+    const err = await client().request({ method: 'GET', path: '/task/1', schema })
+      .then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(ClickUpSchemaError)
+    expect((err as ClickUpSchemaError).issues.join(', ')).not.toBe('(root)')
+    expect((err as ClickUpSchemaError).issues.join(', ').length).toBeGreaterThan(0)
+  })
+
   it('rejects a 2xx response with a non-JSON body instead of treating it as empty', async () => {
     mswServer.use(http.get('https://api.clickup.com/api/v2/list/1',
       () => new HttpResponse('<html>not json</html>', {

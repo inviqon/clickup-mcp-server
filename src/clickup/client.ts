@@ -212,7 +212,18 @@ export class ClickUpClient {
       }
       const result = spec.schema.safeParse(body)
       if (!result.success) {
-        const issues = result.error.issues.map((issue) => issue.path.join('.') || '(root)')
+        // Previously `issue.path.join('.') || '(root)'` - the path alone,
+        // discarding zod's own `issue.message` entirely. For an issue with
+        // no path (a top-level shape mismatch, e.g. a failed union) that
+        // rendered as the bare, meaningless literal "(root)" and nothing
+        // else (observed live, wrapped inside clickup_stop_timer's own
+        // error - see Bug 3). Fixed at the source: every issue now carries
+        // its own message, prefixed with the path only when there is one to
+        // show.
+        const issues = result.error.issues.map((issue) => {
+          const path = issue.path.join('.')
+          return path.length > 0 ? `${path}: ${issue.message}` : issue.message
+        })
         throw new ClickUpSchemaError(`ClickUp response failed schema validation for ${endpoint}`, {
           endpoint,
           issues,
