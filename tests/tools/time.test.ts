@@ -106,6 +106,20 @@ describe('clickup_stop_timer', () => {
     ).rejects.toThrow(/timer stopped successfully.*already happened in ClickUp/s)
   })
 
+  // Bug 3, reproduced exactly: the follow-up PUT succeeds (a 2xx - ClickUp
+  // genuinely applied the description) but its own response body does not
+  // match a TimeEntry shape. This must NOT surface as a failure - the write
+  // succeeded, and the returned entry (from a fresh GET, not the PUT's
+  // unparseable reply) must carry the description that was actually set.
+  it('does not report a failure when the follow-up write succeeds but its response body is unparseable', async () => {
+    mswServer.use(...fx.stopTimerHandlers({ updateResponseShapeless: true }))
+    const out = await tool('clickup_stop_timer').handler(
+      { description: 'Stresstest Zeiterfassung abgeschlossen' },
+      testContext(),
+    )
+    expect(out.description).toBe('Stresstest Zeiterfassung abgeschlossen')
+  })
+
   it('does not attempt a follow-up write when no description or tags were given', async () => {
     const seen: fx.SeenRequest = { called: false }
     mswServer.use(...fx.stopTimerHandlers({ seen }))

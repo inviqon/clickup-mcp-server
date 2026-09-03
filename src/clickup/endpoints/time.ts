@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import type { ClickUpContext } from '../../core/context.js'
 import { formatDate, formatDurationHm } from '../../core/dates.js'
 import {
@@ -43,6 +44,23 @@ export function stopTimerRaw(ctx: ClickUpContext): Promise<TimeEntry> {
   return ctx.client.request({
     method: 'POST',
     path: `/team/${ctx.teamId}/time_entries/stop`,
+    schema: TimeEntryResponseSchema,
+  })
+}
+
+/**
+ * `GET /v2/team/{teamId}/time_entries/{timer_id}` - one time entry by id.
+ * ClickUp's own "Get Singular Time Entry" reference page wraps it in `data`,
+ * the same envelope `TimeEntryResponseSchema` already accepts. Added for
+ * `updateTimeEntryRaw` and the follow-up write inside `clickup_stop_timer`
+ * (src/tools/time.ts) to re-read an entry's post-write state, rather than
+ * trusting whatever PUT .../time_entries/{id} itself returns - see
+ * `updateTimeEntryRaw` below for why that response cannot be trusted.
+ */
+export function getTimeEntryRaw(ctx: ClickUpContext, entryId: string): Promise<TimeEntry> {
+  return ctx.client.request({
+    method: 'GET',
+    path: `/team/${ctx.teamId}/time_entries/${entryId}`,
     schema: TimeEntryResponseSchema,
   })
 }
@@ -130,15 +148,30 @@ export function createTimeEntryRaw(ctx: ClickUpContext, body: Record<string, unk
   })
 }
 
-export function updateTimeEntryRaw(
-  ctx: ClickUpContext,
-  entryId: string,
-  body: Record<string, unknown>,
-): Promise<TimeEntry> {
-  return ctx.client.request({
+/**
+ * `PUT /v2/team/{teamId}/time_entries/{timer_id}`. Observed live: a request
+ * that ClickUp genuinely applied (confirmed by re-reading the entry
+ * afterward - its description matched what was sent) still failed this
+ * call's own schema validation, because the response body did not carry
+ * the current_status/status_history-adjacent `TimeEntry` shape
+ * `TimeEntryResponseSchema` requires. ClickUp's own reference page for this
+ * endpoint documents no response shape at all (an earlier version of this
+ * comment called that "unverified against a live account" - it is now
+ * verified, and the schema this server assumed was wrong). Parsed as
+ * `z.unknown()` here rather than through `TimeEntryResponseSchema`: the
+ * write's success is the 2xx status `ctx.client.request` already enforces,
+ * and this server has no reliable shape to validate the body against, so it
+ * stops trying to and returns nothing. A caller that needs the entry's
+ * post-write state re-reads it via `getTimeEntryRaw` above instead of
+ * parsing this response - the same "writes return the API's view" rule
+ * every other write in this server follows, just satisfied by a genuine
+ * re-read rather than by trusting an unreliable write response.
+ */
+export async function updateTimeEntryRaw(ctx: ClickUpContext, entryId: string, body: Record<string, unknown>): Promise<void> {
+  await ctx.client.request({
     method: 'PUT',
     path: `/team/${ctx.teamId}/time_entries/${entryId}`,
-    schema: TimeEntryResponseSchema,
+    schema: z.unknown(),
     body,
   })
 }

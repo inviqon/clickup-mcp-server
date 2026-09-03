@@ -7,6 +7,7 @@ import {
   createTimeEntryRaw,
   deleteTimeEntryRaw,
   getRunningEntry,
+  getTimeEntryRaw,
   listTimeEntriesRaw,
   startTimerRaw,
   stopTimerRaw,
@@ -148,6 +149,26 @@ function tagsBody(tags: string[] | undefined): { tags: Array<{ name: string }>; 
   return { tags: tags.map((name) => ({ name })), tag_action: 'replace' }
 }
 
+/**
+ * Re-reads a time entry after a write whose own response this server does
+ * not trust (`updateTimeEntryRaw`, src/clickup/endpoints/time.ts - see its
+ * own comment for why). The same "write already happened, only the
+ * confirmation read failed" distinction `refetchAfterWrite`
+ * (src/tools/tasks.ts) makes for tasks: a failure here must never read like
+ * the write itself failed, since by this point it has already succeeded.
+ */
+async function refetchTimeEntryAfterWrite(ctx: ClickUpContext, entryId: string, whatSucceeded: string): Promise<TimeEntry> {
+  try {
+    return await getTimeEntryRaw(ctx, entryId)
+  } catch (err) {
+    throw new ClickUpUsageError(
+      `${whatSucceeded} succeeded, but reading time entry ${entryId} back afterward failed: ` +
+        `${toAgentMessage(err, { resource: 'time entry', id: entryId })} The write already happened in ClickUp - ` +
+        `check the entry with clickup_list_time_entries before retrying.`,
+    )
+  }
+}
+
 // ---------------------------------------------------------------------------
 // clickup_start_timer
 // ---------------------------------------------------------------------------
@@ -242,7 +263,7 @@ export const stopTimerTool: ToolDefinition<typeof stopTimerInputShape, typeof ti
     }
 
     try {
-      const updated = await updateTimeEntryRaw(
+      await updateTimeEntryRaw(
         ctx,
         stopped.id,
         omitUnset({
@@ -250,7 +271,6 @@ export const stopTimerTool: ToolDefinition<typeof stopTimerInputShape, typeof ti
           ...tagsBody(args.tags),
         }),
       )
-      return toTimeEntryOut(updated, ctx.timezone)
     } catch (err) {
       throw new ClickUpUsageError(
         `The timer stopped successfully (entry ${stopped.id}, ${stoppedOut.duration} tracked), but setting its ` +
@@ -259,6 +279,18 @@ export const stopTimerTool: ToolDefinition<typeof stopTimerInputShape, typeof ti
           'clickup_list_time_entries before retrying.',
       )
     }
+
+    // The description/tags write above only confirms via its 2xx status
+    // (see `updateTimeEntryRaw`'s own comment) - it does not itself carry a
+    // trustworthy entry shape. Re-read so the returned view reflects what
+    // was actually written, the same "writes return the API's view" rule
+    // every other write tool in this server follows.
+    const updated = await refetchTimeEntryAfterWrite(
+      ctx,
+      stopped.id,
+      `Stopping the timer (entry ${stopped.id}, ${stoppedOut.duration} tracked) and setting its description/tags`,
+    )
+    return toTimeEntryOut(updated, ctx.timezone)
   },
   render: (out) => [`Stopped ${timeEntryTaskLabel(out)} - ${out.duration} tracked.`, '', ...renderTimeEntryLines(out)].join('\n'),
 }
@@ -524,17 +556,18 @@ export const updateTimeEntryTool: ToolDefinition<typeof updateTimeEntryInputShap
   inputSchema: updateTimeEntryInputShape,
   outputSchema: timeEntryOutputShape,
   handler: async (args, ctx) => {
-    // Open question, unverified against a live ClickUp account: ClickUp's
-    // own "Update a Time Entry" reference page documents `start` as
-    // requiring `end` to be supplied alongside it, but this server has no
-    // way to know an entry's current `end` before writing (there is no
-    // "get one time entry by id" endpoint to read it back first), and this
-    // tool's own input schema only takes `start`/`duration`, not `end`.
-    // Deliberate choice: send exactly the fields the caller gave, via
-    // `omitUnset`, rather than guessing a plausible `end` and risking a
-    // fabricated value reaching ClickUp. If updating `start` alone (without
-    // `duration`) 400s in practice, that is the sign this assumption is
-    // wrong and `end` needs to be resolved from a prior read instead.
+    // Open question, still unverified against a live ClickUp account:
+    // ClickUp's own "Update a Time Entry" reference page documents `start`
+    // as requiring `end` to be supplied alongside it. `getTimeEntryRaw`
+    // (src/clickup/endpoints/time.ts) does now exist and could read an
+    // entry's current `end` before writing, but this tool's own input
+    // schema only takes `start`/`duration`, not `end`, and a pre-write read
+    // here has not been added. Deliberate choice, for now: send exactly the
+    // fields the caller gave, via `omitUnset`, rather than guessing a
+    // plausible `end` and risking a fabricated value reaching ClickUp. If
+    // updating `start` alone (without `duration`) 400s in practice, that is
+    // the sign this assumption is wrong and `end` needs to be resolved from
+    // a prior read instead.
     const body = omitUnset({
       start: args.start !== undefined ? resolveDate(args.start, { timezone: ctx.timezone }).epochMs : undefined,
       duration: args.duration !== undefined ? parseDuration(args.duration) : undefined,
@@ -542,7 +575,10 @@ export const updateTimeEntryTool: ToolDefinition<typeof updateTimeEntryInputShap
       billable: args.billable,
       ...tagsBody(args.tags),
     })
-    const updated = await updateTimeEntryRaw(ctx, args.entry_id, body)
+    await updateTimeEntryRaw(ctx, args.entry_id, body)
+    // See clickup_stop_timer above for why this re-reads rather than
+    // trusting updateTimeEntryRaw's own response.
+    const updated = await refetchTimeEntryAfterWrite(ctx, args.entry_id, `Updating time entry ${args.entry_id}`)
     return toTimeEntryOut(updated, ctx.timezone)
   },
   render: (out) => [`Updated time entry ${out.id}.`, '', ...renderTimeEntryLines(out)].join('\n'),

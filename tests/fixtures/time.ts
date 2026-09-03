@@ -113,9 +113,23 @@ export function startTimerHandlers(seen: SeenRequest) {
  * backs the follow-up description/tags write `clickup_stop_timer` issues
  * when either was requested; `opts.updateFails` makes that follow-up write
  * fail with a ClickUp-shaped error, exercising the "stop already happened,
- * only the follow-up failed" path.
+ * only the follow-up failed" path. `opts.updateResponseShapeless` makes
+ * that PUT succeed (2xx) but return a body this server cannot parse as a
+ * `TimeEntry` - the shape observed live (Bug 3): the write still applies
+ * (the description/tags below still land on `current`, and the follow-up
+ * GET below still reports them), only the PUT's own response is
+ * unparseable, exercising "the write succeeded even though its own
+ * response could not be trusted."
+ *
+ * GET /v2/team/9007/time_entries/:id (ClickUp's "Get Singular Time Entry")
+ * backs the post-write re-read `clickup_stop_timer` now does instead of
+ * trusting the PUT's own response - it always reports `current`, which the
+ * PUT handler below updates, so the re-read genuinely reflects the write
+ * rather than a value frozen at stop time.
  */
-export function stopTimerHandlers(opts: { durationMs?: number; updateFails?: boolean; seen?: SeenRequest } = {}) {
+export function stopTimerHandlers(
+  opts: { durationMs?: number; updateFails?: boolean; updateResponseShapeless?: boolean; seen?: SeenRequest } = {},
+) {
   const durationMs = opts.durationMs ?? 45 * 60_000
   const stopped = {
     id: 'timer_1',
@@ -131,6 +145,7 @@ export function stopTimerHandlers(opts: { durationMs?: number; updateFails?: boo
     source: 'clickup',
     at: 1757000000000,
   }
+  let current: Record<string, unknown> = stopped
   return [
     http.post(`${API}/v2/team/${TEAM_ID}/time_entries/stop`, () => HttpResponse.json({ data: stopped })),
     http.put(`${API}/v2/team/${TEAM_ID}/time_entries/${stopped.id}`, async ({ request }) => {
@@ -144,14 +159,20 @@ export function stopTimerHandlers(opts: { durationMs?: number; updateFails?: boo
       if (opts.seen !== undefined) {
         opts.seen.body = body
       }
-      return HttpResponse.json({
-        data: {
-          ...stopped,
-          description: (body.description as string) ?? stopped.description,
-          tags: Array.isArray(body.tags) ? body.tags : stopped.tags,
-        },
-      })
+      current = {
+        ...current,
+        description: (body.description as string) ?? current.description,
+        tags: Array.isArray(body.tags) ? body.tags : current.tags,
+      }
+      if (opts.updateResponseShapeless) {
+        // A real, observed-live 2xx body this server's schema cannot parse
+        // as a TimeEntry - not an object with a `data` envelope, and not a
+        // bare TimeEntry either.
+        return HttpResponse.json(true)
+      }
+      return HttpResponse.json({ data: current })
     }),
+    http.get(`${API}/v2/team/${TEAM_ID}/time_entries/${stopped.id}`, () => HttpResponse.json({ data: current })),
   ]
 }
 
@@ -253,27 +274,43 @@ export function createTimeEntryHandlers(seen: SeenRequest = { called: false }) {
 
 // -- Update time entry fixtures --------------------------------------------
 
+/**
+ * PUT /v2/team/9007/time_entries/:id plus GET .../time_entries/:id (ClickUp's
+ * "Get Singular Time Entry") backing `clickup_update_time_entry`'s post-write
+ * re-read (Bug 3 - see `stopTimerHandlers` above for why the tool no longer
+ * trusts the PUT's own response). `current` starts at a base entry and is
+ * updated by whatever the PUT actually receives, so the GET the tool issues
+ * afterward genuinely reflects the write.
+ */
 export function updateTimeEntryHandlers(entryId = 'te-1', seen: SeenRequest = { called: false }) {
+  let current: Record<string, unknown> = {
+    id: entryId,
+    task: taskRef(),
+    wid: TEAM_ID,
+    user: USER,
+    billable: false,
+    start: '1757000000000',
+    duration: 3_600_000,
+    description: '',
+    tags: [],
+    at: '1757000000000',
+  }
   return [
     http.put(`${API}/v2/team/${TEAM_ID}/time_entries/${entryId}`, async ({ request }) => {
       seen.called = true
       const body = (await request.json()) as Record<string, unknown>
       seen.body = body
-      return HttpResponse.json({
-        data: {
-          id: entryId,
-          task: taskRef(),
-          wid: TEAM_ID,
-          user: USER,
-          billable: (body.billable as boolean) ?? false,
-          start: body.start !== undefined ? String(body.start) : '1757000000000',
-          duration: body.duration ?? 3_600_000,
-          description: (body.description as string) ?? '',
-          tags: Array.isArray(body.tags) ? body.tags : [],
-          at: '1757000000000',
-        },
-      })
+      current = {
+        ...current,
+        billable: body.billable ?? current.billable,
+        start: body.start !== undefined ? String(body.start) : current.start,
+        duration: body.duration ?? current.duration,
+        description: (body.description as string) ?? current.description,
+        tags: Array.isArray(body.tags) ? body.tags : current.tags,
+      }
+      return HttpResponse.json({ data: current })
     }),
+    http.get(`${API}/v2/team/${TEAM_ID}/time_entries/${entryId}`, () => HttpResponse.json({ data: current })),
   ]
 }
 
