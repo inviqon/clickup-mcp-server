@@ -5,14 +5,17 @@ const err = (status: number, endpoint: string, ecode?: string, clickupMessage?: 
   new ClickUpApiError('api failed', { status, endpoint, ecode, clickupMessage })
 
 describe('toAgentMessage', () => {
-  it('maps 401 to a credential hint', () => {
+  it('maps 401 to a hedged credential hint, not a firm diagnosis', () => {
     expect(toAgentMessage(err(401, '/v2/user')))
-      .toBe('Invalid ClickUp token. Check CLICKUP_API_KEY.')
+      .toBe('Check CLICKUP_API_KEY - a bad token is the most common cause of a 401, but ClickUp also answers 401 when the token cannot resolve the requested resource, for example an unknown or foreign task id, in which case checking the key will not help.')
   })
 
   it('puts ClickUp\'s own message first on a 401 that carries one, with no dangling separator', () => {
-    expect(toAgentMessage(err(401, '/v2/user', undefined, 'Token not found')))
-      .toBe('ClickUp says: "Token not found". Invalid ClickUp token. Check CLICKUP_API_KEY.')
+    // Demonstrably wrong to assert the token is invalid here in general:
+    // ClickUp returned "Team not authorized" live for an unresolvable task
+    // id with a token that worked for every other call in the session.
+    expect(toAgentMessage(err(401, '/v2/user', undefined, 'Team not authorized')))
+      .toBe('ClickUp says: "Team not authorized". Check CLICKUP_API_KEY - a bad token is the most common cause of a 401, but ClickUp also answers 401 when the token cannot resolve the requested resource, for example an unknown or foreign task id, in which case checking the key will not help.')
   })
 
   it('maps 404 on a list to a discovery next step naming the id', () => {

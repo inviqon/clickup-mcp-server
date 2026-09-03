@@ -98,7 +98,15 @@ function apiErrorMessage(err: ClickUpApiError, hint: AgentMessageHint | undefine
   const prefix = clickupMessagePrefix(err)
   switch (err.status) {
     case 401:
-      return `${prefix}Invalid ClickUp token. Check CLICKUP_API_KEY.`
+      // Live testing against an unknown task id returned this same status
+      // with ClickUp's own "Team not authorized" - not a bad token; every
+      // other call in the same session succeeded with it. So this hint
+      // states a possibility, not a diagnosis, the same way the 403 branch
+      // below does: a bad token is still the most common cause of a 401 and
+      // worth checking, but ClickUp also answers 401 when the token cannot
+      // resolve the requested resource (an unknown or foreign task id, for
+      // example), and checking the key will not help with that.
+      return `${prefix}Check CLICKUP_API_KEY - a bad token is the most common cause of a 401, but ClickUp also answers 401 when the token cannot resolve the requested resource, for example an unknown or foreign task id, in which case checking the key will not help.`
     case 403:
       // A live workspace produced a 403 whose ClickUp message ("Time In
       // Status is not available on your plan") had nothing to do with

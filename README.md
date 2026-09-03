@@ -135,8 +135,10 @@ There is deliberately **no startup token probe on this transport**, unlike
 stdio. Each request resolves its own token, so the equivalent check would be
 a `GET /v2/user` round trip added to every single tool call, to re-learn
 something the call's own first upstream request reports anyway. A bad token
-here surfaces as ClickUp's own 401, mapped to
-`Invalid ClickUp token. Check CLICKUP_API_KEY.`, on the first tool the client
+here surfaces as ClickUp's own 401, mapped to a hint naming
+`CLICKUP_API_KEY` as worth checking (see `src/core/errors.ts` for the exact
+wording - a 401 can also mean the token could not resolve the requested
+resource, not that the token itself is bad), on the first tool the client
 calls.
 
 - `Authorization: <token>` or `Authorization: Bearer <token>` (both accepted;
