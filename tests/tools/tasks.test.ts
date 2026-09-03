@@ -235,6 +235,7 @@ describe('clickup_create_task', () => {
         body = (await request.json()) as Record<string, unknown>
         return HttpResponse.json(fx.createdTask({ due_date: body.due_date as number }))
       }),
+      http.get(`${API}/v2/task/86new`, () => HttpResponse.json(fx.createdTask({ due_date: body.due_date as number }))),
     )
     const out = await tool('clickup_create_task').handler(
       { list_id: '100', name: 'Ship it', due_date: 'tomorrow 17:00' },
@@ -242,6 +243,28 @@ describe('clickup_create_task', () => {
     )
     expect(typeof body.due_date).toBe('number')
     expect(tool('clickup_create_task').render(out, testContext())).toContain('+02:00')
+  })
+
+  // Bug 2: without `due_date_time`/`start_date_time`, ClickUp silently
+  // truncates the timestamp to the start of its own day even when the
+  // caller asked for a specific time (observed live: "tomorrow 17:00" came
+  // back as "04:00"). The flag must be sent, and only when a time was
+  // actually given - "tomorrow" alone must stay date-only.
+  it('sets due_date_time and start_date_time only when a time of day was given', async () => {
+    let body: Record<string, unknown> = {}
+    mswServer.use(
+      http.post(`${API}/v2/list/100/task`, async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(fx.createdTask())
+      }),
+      http.get(`${API}/v2/task/86new`, () => HttpResponse.json(fx.createdTask())),
+    )
+    await tool('clickup_create_task').handler(
+      { list_id: '100', name: 'Ship it', due_date: 'tomorrow 17:00', start_date: 'tomorrow' },
+      testContext(),
+    )
+    expect(body.due_date_time).toBe(true)
+    expect(body.start_date_time).toBe(false)
   })
 
   it('rejects an unknown status naming the ones the list actually has', async () => {
@@ -278,12 +301,50 @@ describe('clickup_create_task', () => {
         body = (await request.json()) as Record<string, unknown>
         return HttpResponse.json(fx.createdTask())
       }),
+      http.get(`${API}/v2/task/86new`, () => HttpResponse.json(fx.createdTask())),
     )
     await tool('clickup_create_task').handler(
       { list_id: '100', name: 'Write migration', parent: '86abc' },
       testContext(),
     )
     expect(body.parent).toBe('86abc')
+  })
+
+  // Bug 1's residual failure: `createTaskRaw`'s own POST response carries no
+  // `markdown_description` (ClickUp only includes it when
+  // `include_markdown_description=true` is passed, and that is a GET-only
+  // query parameter). Returning that response directly meant the agent saw
+  // the description flattened - headings, bold, code spans and checkboxes
+  // all gone - on every create that had no custom fields, even though
+  // `markdown_content` (asserted on the outgoing body below) preserved them
+  // in ClickUp itself. Asserted on both the outgoing body AND the returned
+  // value, per the increment brief.
+  it('a created task\'s description survives a markdown round trip intact', async () => {
+    let body: Record<string, unknown> = {}
+    mswServer.use(
+      http.post(`${API}/v2/list/100/task`, async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(fx.createdTask())
+      }),
+      http.get(`${API}/v2/task/86new`, () =>
+        HttpResponse.json({
+          ...fx.createdTask(),
+          description: fx.MARKDOWN_DESCRIPTION_FLATTENED,
+          markdown_description: fx.MARKDOWN_DESCRIPTION,
+        }),
+      ),
+    )
+    const out = await tool('clickup_create_task').handler(
+      { list_id: '100', name: 'Testticket', description: fx.MARKDOWN_DESCRIPTION },
+      testContext(),
+    )
+    expect(body.markdown_content).toBe(fx.MARKDOWN_DESCRIPTION)
+    expect(body.description).toBeUndefined()
+    expect(out.description).toContain('# Repro steps')
+    expect(out.description).toContain('**SSO**')
+    expect(out.description).toContain('`redirect_uri`')
+    expect(out.description).toContain('- [ ] Confirm against staging')
+    expect(out.description).not.toBe(fx.MARKDOWN_DESCRIPTION_FLATTENED)
   })
 
   it('returns the re-fetched task with the custom field actually populated, not the pre-write snapshot (Finding 2)', async () => {
@@ -383,6 +444,38 @@ describe('clickup_update_task', () => {
     expect(body.description).toBeUndefined()
   })
 
+  // Same append round trip, but asserted on the RETURNED value too, not
+  // just the outgoing body - the increment brief calls this out as the
+  // worst version of the bug: an agent reading the tool's own response,
+  // not the wire, is who "silently reformats everything that was already
+  // there" would actually mislead.
+  it('the returned task carries the appended markdown intact, not the flattened form', async () => {
+    let sentBody: Record<string, unknown> = {}
+    mswServer.use(
+      http.get(`${API}/v2/task/86abc`, () => {
+        // Before the write, ClickUp still has the original description;
+        // after, it reports back exactly what was PUT - modelling a real
+        // (consistent) ClickUp, not a fixture frozen at the pre-write state.
+        const current =
+          sentBody.markdown_content !== undefined
+            ? { ...fx.taskDetailBody(), description: fx.MARKDOWN_DESCRIPTION_FLATTENED, markdown_description: String(sentBody.markdown_content) }
+            : fx.taskDetailBody()
+        return HttpResponse.json(current)
+      }),
+      http.put(`${API}/v2/task/86abc`, async ({ request }) => {
+        sentBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(fx.taskDetailBody())
+      }),
+    )
+    const out = await tool('clickup_update_task').handler({ task_id: '86abc', description: 'New note' }, testContext())
+    expect(out.description).toContain('# Repro steps')
+    expect(out.description).toContain('**SSO**')
+    expect(out.description).toContain('`redirect_uri`')
+    expect(out.description).toContain('- [ ] Confirm against staging')
+    expect(out.description).toContain('New note')
+    expect(out.description).not.toBe(fx.MARKDOWN_DESCRIPTION_FLATTENED)
+  })
+
   it('asks ClickUp for the markdown description rather than the flattened one', async () => {
     const seen: string[] = []
     mswServer.use(
@@ -446,9 +539,13 @@ describe('clickup_update_task', () => {
   })
 
   it('returns the task as the API reports it, not the input echo', async () => {
+    // The returned view comes from a post-write re-read (see
+    // clickup_create_task's "always re-read" note above), not from the
+    // PUT's own response - so it is the subsequent GET, not the PUT, that
+    // must report the server's own value here.
     mswServer.use(
-      ...fx.taskHandlers(),
-      ...fx.updateHandler(() => {}, { name: 'Server wins' }),
+      http.get(`${API}/v2/task/86abc`, () => HttpResponse.json({ ...fx.taskDetailBody(), name: 'Server wins' })),
+      ...fx.updateHandler(() => {}),
     )
     const out = await tool('clickup_update_task').handler({ task_id: '86abc', name: 'Client says' }, testContext())
     expect(out.name).toBe('Server wins')
@@ -459,6 +556,23 @@ describe('clickup_update_task', () => {
     await expect(
       tool('clickup_update_task').handler({ task_id: '86abc', status: 'shipped' }, testContext()),
     ).rejects.toThrow(/List 100 has no status "shipped". Available: open, in progress, closed/)
+  })
+
+  // Bug 2, at the update path: same truncation bug as clickup_create_task.
+  it('sets due_date_time and start_date_time only when a time of day was given', async () => {
+    let body: Record<string, unknown> = {}
+    mswServer.use(
+      ...fx.taskHandlers(),
+      ...fx.updateHandler((b) => {
+        body = b
+      }),
+    )
+    await tool('clickup_update_task').handler(
+      { task_id: '86abc', due_date: 'tomorrow 17:00', start_date: 'tomorrow' },
+      testContext(),
+    )
+    expect(body.due_date_time).toBe(true)
+    expect(body.start_date_time).toBe(false)
   })
 
   it('parses time_estimate durations like "1h30m"', async () => {
@@ -506,6 +620,23 @@ describe('clickup_update_task', () => {
 })
 
 describe('clickup_update_tasks_bulk', () => {
+  // Bug 2, at the bulk path: same truncation bug as clickup_create_task.
+  it('sets due_date_time only when a time of day was given', async () => {
+    const bodies: Record<string, unknown>[] = []
+    mswServer.use(
+      http.put(`${API}/v2/task/:taskId`, async ({ request, params }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        bodies.push(body)
+        return HttpResponse.json({ ...fx.taskDetailBody(), id: params.taskId as string })
+      }),
+    )
+    await tool('clickup_update_tasks_bulk').handler(
+      { task_ids: ['86abc'], due_date: 'tomorrow 17:00' },
+      testContext(),
+    )
+    expect(bodies[0]?.due_date_time).toBe(true)
+  })
+
   it('reports per task success and failure rather than failing the whole call', async () => {
     mswServer.use(...fx.bulkHandlers({ failing: ['86bad'] }))
     const out = await tool('clickup_update_tasks_bulk').handler(

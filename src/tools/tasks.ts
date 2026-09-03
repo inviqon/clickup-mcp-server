@@ -63,6 +63,27 @@ export function toAssigneeId(id: string): number {
 }
 
 /**
+ * Resolves `due_date`/`start_date` once each, carrying `hasTime` alongside
+ * the epoch so the write body can tell ClickUp whether a time of day was
+ * actually asked for. Without `due_date_time`/`start_date_time` set,
+ * ClickUp silently truncates the timestamp to the start of its own day even
+ * when the caller supplied one (observed live: `due_date: "tomorrow
+ * 17:00"` came back as "04:00") - the same data-loss class Bug 1 already
+ * fixed for descriptions, at a different field. `resolveDate` itself
+ * reports whether the input carried a time (`ResolvedDate.hasTime`,
+ * src/core/dates.ts) so this never re-parses the string to guess.
+ */
+function resolveDueAndStartDate(
+  args: { due_date?: string | undefined; start_date?: string | undefined },
+  ctx: ClickUpContext,
+): { due: ReturnType<typeof resolveDate> | undefined; start: ReturnType<typeof resolveDate> | undefined } {
+  return {
+    due: args.due_date !== undefined ? resolveDate(args.due_date, { timezone: ctx.timezone }) : undefined,
+    start: args.start_date !== undefined ? resolveDate(args.start_date, { timezone: ctx.timezone }) : undefined,
+  }
+}
+
+/**
  * Re-reads a task after a write whose own response does not carry the
  * task's full state (the v3 move endpoint, and both `clickup_link_tasks`
  * relation kinds). If this re-read fails, the write itself already
@@ -368,6 +389,12 @@ export const createTaskTool: ToolDefinition<typeof createTaskInputShape, typeof 
     const resolvedFields =
       args.custom_fields !== undefined ? await resolveCustomFields(ctx, args.list_id, args.custom_fields) : []
 
+    // Resolved once, ahead of the body, so both the epoch and whether it
+    // carries a time of day (`hasTime`) come from the exact same parse -
+    // see `resolveDueAndStartDate` below for why the flag has to be sent at
+    // all.
+    const { due, start } = resolveDueAndStartDate(args, ctx)
+
     const body = omitUnset({
       name: args.name,
       // `markdown_content`, not `description`: ClickUp's own contract says
@@ -380,18 +407,15 @@ export const createTaskTool: ToolDefinition<typeof createTaskInputShape, typeof 
       assignees: args.assignees !== undefined ? args.assignees.map(toAssigneeId) : undefined,
       tags: args.tags,
       priority: args.priority !== undefined ? PRIORITY_TO_INT[args.priority] : undefined,
-      due_date: args.due_date !== undefined ? resolveDate(args.due_date, { timezone: ctx.timezone }).epochMs : undefined,
-      start_date:
-        args.start_date !== undefined ? resolveDate(args.start_date, { timezone: ctx.timezone }).epochMs : undefined,
+      due_date: due?.epochMs,
+      due_date_time: due?.hasTime,
+      start_date: start?.epochMs,
+      start_date_time: start?.hasTime,
       time_estimate: args.time_estimate !== undefined ? parseDuration(args.time_estimate) : undefined,
       parent: args.parent,
     })
 
     const created = await createTaskRaw(ctx, args.list_id, body)
-
-    if (resolvedFields.length === 0) {
-      return toTaskOut(created, ctx)
-    }
 
     // The task already exists at this point. A custom-field write failing
     // here (rate limit, network blip - name validation already happened in
@@ -413,18 +437,28 @@ export const createTaskTool: ToolDefinition<typeof createTaskInputShape, typeof 
       }
     })
 
-    // Re-read the task so the returned custom_fields reflect what was
-    // actually written, not the pre-field-write snapshot from `created`.
-    // Routed through refetchAfterWrite, not a bare getTaskDetail: the task
-    // (and possibly some or all of its custom fields) already exist in
-    // ClickUp by this point, so a transient failure on THIS read must not
-    // present as an undecorated error that loses the task id - the same
-    // failure mode Finding 2 already fixed for the field writes themselves
-    // would otherwise reopen one step later.
+    // Always re-read the task, even when there were no custom fields to
+    // write: `createTaskRaw`'s own response (POST's own reply) carries no
+    // `markdown_description` - ClickUp only includes that field when
+    // `include_markdown_description=true` is passed, and that is a GET-only
+    // query parameter, never honoured on a write (verified against
+    // ClickUp's own reference pages for both). Returning `created` directly
+    // for the common "no custom fields" case meant `toTaskOut` fell back to
+    // `created.description`, the flattened plain-text form, even though the
+    // markdown actually written via `markdown_content` above was stored
+    // correctly - the agent saw a description stripped of its headings,
+    // bold, code spans and checkboxes on every create that had no custom
+    // fields, which is the majority of them. Routed through
+    // `refetchAfterWrite`, not a bare `getTaskDetail`, for the same reason
+    // the custom-field path already was: the task genuinely exists in
+    // ClickUp by this point, so a transient failure on this read must not
+    // present as an undecorated error that loses the task id.
     const whatSucceeded =
-      customFieldErrors.length > 0
-        ? `Creating the task (${customFieldErrors.length} of ${resolvedFields.length} custom field write(s) failed, named below)`
-        : `Creating the task and writing its ${resolvedFields.length} custom field(s)`
+      resolvedFields.length === 0
+        ? 'Creating the task'
+        : customFieldErrors.length > 0
+          ? `Creating the task (${customFieldErrors.length} of ${resolvedFields.length} custom field write(s) failed, named below)`
+          : `Creating the task and writing its ${resolvedFields.length} custom field(s)`
     const refetched = await refetchAfterWrite(ctx, created.id, whatSucceeded)
     const out = toTaskOut(refetched, ctx)
     if (customFieldErrors.length > 0) {
@@ -507,6 +541,10 @@ export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof 
           : appendDescription(taskDescription(current), args.description)
         : undefined
 
+    // See clickup_create_task above for why both the epoch and `hasTime`
+    // are needed.
+    const { due, start } = resolveDueAndStartDate(args, ctx)
+
     const body = omitUnset({
       name: args.name,
       // See clickup_create_task above for why this is `markdown_content`.
@@ -515,18 +553,15 @@ export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof 
       assignees: args.assignees !== undefined ? { add: args.assignees.map(toAssigneeId) } : undefined,
       tags: args.tags,
       priority: args.priority !== undefined ? PRIORITY_TO_INT[args.priority] : undefined,
-      due_date: args.due_date !== undefined ? resolveDate(args.due_date, { timezone: ctx.timezone }).epochMs : undefined,
-      start_date:
-        args.start_date !== undefined ? resolveDate(args.start_date, { timezone: ctx.timezone }).epochMs : undefined,
+      due_date: due?.epochMs,
+      due_date_time: due?.hasTime,
+      start_date: start?.epochMs,
+      start_date_time: start?.hasTime,
       time_estimate: args.time_estimate !== undefined ? parseDuration(args.time_estimate) : undefined,
       parent: args.parent,
     })
 
     const updated = await updateTaskRaw(ctx, args.task_id, body)
-
-    if (resolvedFields.length === 0) {
-      return toTaskOut(updated, ctx)
-    }
 
     // Same reasoning as clickup_create_task: the update already happened,
     // so a custom-field write failure here must not make the task's id
@@ -544,12 +579,19 @@ export const updateTaskTool: ToolDefinition<typeof updateTaskInputShape, typeof 
       }
     })
 
-    // See clickup_create_task above for why this goes through
-    // refetchAfterWrite rather than a bare getTaskDetail.
+    // Always re-read the task, even when there were no custom fields to
+    // write - see clickup_create_task above for why: `updateTaskRaw`'s own
+    // PUT response carries no `markdown_description` either, so returning
+    // it directly for the common "no custom fields" case flattened the
+    // returned description on every plain update, not just ones with
+    // custom fields. Routed through refetchAfterWrite for the same reason
+    // as clickup_create_task.
     const whatSucceeded =
-      customFieldErrors.length > 0
-        ? `Updating the task (${customFieldErrors.length} of ${resolvedFields.length} custom field write(s) failed, named below)`
-        : `Updating the task and writing its ${resolvedFields.length} custom field(s)`
+      resolvedFields.length === 0
+        ? 'Updating the task'
+        : customFieldErrors.length > 0
+          ? `Updating the task (${customFieldErrors.length} of ${resolvedFields.length} custom field write(s) failed, named below)`
+          : `Updating the task and writing its ${resolvedFields.length} custom field(s)`
     const refetched = await refetchAfterWrite(ctx, args.task_id, whatSucceeded)
     const out = toTaskOut(refetched, ctx)
     if (customFieldErrors.length > 0) {
@@ -593,11 +635,15 @@ export const updateTasksBulkTool: ToolDefinition<typeof bulkUpdateInputShape, ty
   inputSchema: bulkUpdateInputShape,
   outputSchema: bulkUpdateOutputShape,
   handler: async (args, ctx) => {
+    // See clickup_create_task above for why both the epoch and `hasTime`
+    // are needed - the same truncation bug applies here.
+    const due = args.due_date !== undefined ? resolveDate(args.due_date, { timezone: ctx.timezone }) : undefined
     const body = omitUnset({
       status: args.status,
       assignees: args.assignees !== undefined ? { add: args.assignees.map(toAssigneeId) } : undefined,
       priority: args.priority !== undefined ? PRIORITY_TO_INT[args.priority] : undefined,
-      due_date: args.due_date !== undefined ? resolveDate(args.due_date, { timezone: ctx.timezone }).epochMs : undefined,
+      due_date: due?.epochMs,
+      due_date_time: due?.hasTime,
     })
 
     const results = await Promise.allSettled(args.task_ids.map((taskId) => updateTaskRaw(ctx, taskId, body)))
