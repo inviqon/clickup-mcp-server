@@ -117,8 +117,22 @@ function apiErrorMessage(err: ClickUpApiError, hint: AgentMessageHint | undefine
       }
       return `${prefix}ClickUp rate limit hit. Wait a moment and retry.`
     }
+    case 400:
+      // A 400 means ClickUp rejected the request itself - the same
+      // arguments will fail again on retry, so "retry" is advice that
+      // cannot help here (observed live, on a bulk update against a
+      // deliberately invalid task id). `err.message` is never included: it
+      // is always this server's own synthetic text (e.g. "ClickUp API
+      // request failed (400)"), which repeats the status code already
+      // named just before it and adds nothing a reader does not already
+      // have - doubly so when `prefix` above already carries ClickUp's own
+      // explanation.
+      return `${prefix}ClickUp API error (400) calling ${err.endpoint}. Check the arguments you sent - a 400 means ClickUp rejected the request itself, and retrying unchanged will not help.`
     default:
-      return `${prefix}ClickUp API error (${err.status}) calling ${err.endpoint}: ${err.message}. Retry, or check the ClickUp API status page if this persists.`
+      // See the 400 case above for why `err.message` is not included here
+      // either - it is always redundant with "(${err.status})" just before
+      // it, for every status this default branch handles.
+      return `${prefix}ClickUp API error (${err.status}) calling ${err.endpoint}. Retry, or check the ClickUp API status page if this persists.`
   }
 }
 

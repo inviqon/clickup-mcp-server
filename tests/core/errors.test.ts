@@ -80,10 +80,36 @@ describe('toAgentMessage', () => {
       .toBe('ClickUp says: "Rate limit exceeded". ClickUp rate limit hit. Wait a moment and retry.')
   })
 
+  // Smaller issue 4: observed live in a bulk update against a deliberately
+  // invalid task id. A 400 means ClickUp rejected the request itself, so
+  // "retry" is advice that cannot help - and the message must not repeat
+  // itself by also including this server's own synthetic
+  // "ClickUp API request failed (400)" sentence alongside ClickUp's own
+  // "Task ID invalid" (already surfaced via `prefix`).
+  it('advises checking the arguments on a 400, not retrying, without a redundant synthetic sentence', () => {
+    const msg = toAgentMessage(err(400, '/v2/task/869eunINVALID', undefined, 'Task ID invalid'))
+    expect(msg).toContain('ClickUp says: "Task ID invalid".')
+    expect(msg).toContain('ClickUp API error (400)')
+    expect(msg).toMatch(/check the arguments/i)
+    expect(msg).not.toContain('Retry')
+    expect(msg).not.toContain('api failed')
+  })
+
+  it('advises checking arguments on a 400 with no ClickUp message either', () => {
+    const msg = toAgentMessage(err(400, '/v2/task/869eunINVALID'))
+    expect(msg).toMatch(/check the arguments/i)
+    expect(msg).not.toContain('Retry')
+    expect(msg).not.toContain('api failed')
+  })
+
   it('gives a retry next step for an unmapped status code', () => {
     const msg = toAgentMessage(err(500, '/v2/task/1'))
     expect(msg).toContain('ClickUp API error (500)')
     expect(msg).toContain('Retry')
+    // Not the redundant synthetic sentence either - "api failed" is this
+    // test's stand-in for the server's own generated message text, which
+    // never adds information beyond the "(500)" already shown.
+    expect(msg).not.toContain('api failed')
   })
 
   it('puts ClickUp\'s own message first on an unmapped status code that carries one', () => {
