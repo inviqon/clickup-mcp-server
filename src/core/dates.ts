@@ -19,6 +19,24 @@ export type ResolveDateOptions = {
 export type ResolvedDate = {
   epochMs: number
   iso: string
+  /**
+   * Whether `input` named a specific time of day, as opposed to only a
+   * calendar date. Reported here rather than re-parsed at the call site
+   * (src/tools/tasks.ts) so `clickup_create_task`/`clickup_update_task` can
+   * tell ClickUp whether to set `due_date_time`/`start_date_time`: without
+   * that flag ClickUp silently truncates a due date to the start of its own
+   * day, discarding a time the caller explicitly asked for (observed live:
+   * "tomorrow 17:00" came back as "04:00"). `true` for an epoch/numeric
+   * input (an exact instant is unambiguous), an ISO string that itself
+   * carries a time component, or "today"/"tomorrow"/"yesterday HH:MM".
+   * `false` for a bare ISO date, a bare "today"/"tomorrow"/"yesterday",
+   * "next/last <weekday>" (no time syntax exists for either), and every
+   * calendar-unit relative form ("in 3 days", "2 weeks ago" - also no time
+   * syntax). Elapsed-time relative forms ("in 2 hours", "3 minutes ago")
+   * are `true`: unlike the calendar-unit forms, they are inherently about a
+   * specific instant, not a calendar day.
+   */
+  hasTime: boolean
 }
 
 /**
@@ -248,14 +266,14 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
   const now = opts.now ?? new Date()
 
   if (typeof input === 'number') {
-    return { epochMs: input, iso: formatDate(input, timezone) }
+    return { epochMs: input, iso: formatDate(input, timezone), hasTime: true }
   }
 
   const trimmed = input.trim()
 
   if (/^-?\d+$/.test(trimmed)) {
     const epochMs = Number(trimmed)
-    return { epochMs, iso: formatDate(epochMs, timezone) }
+    return { epochMs, iso: formatDate(epochMs, timezone), hasTime: true }
   }
 
   const isoDateMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/)
@@ -293,14 +311,17 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
       if (epochMs === null) {
         throw parseError(input)
       }
-      return { epochMs, iso: formatDate(epochMs, timezone) }
+      return { epochMs, iso: formatDate(epochMs, timezone), hasTime: hourStr !== undefined }
     }
 
     const isoCandidate = Date.parse(trimmed)
     if (Number.isNaN(isoCandidate)) {
       throw parseError(input)
     }
-    return { epochMs: isoCandidate, iso: formatDate(isoCandidate, timezone) }
+    // Reaches here only when the bare-date regex above did not match, i.e.
+    // the input carried more than just a calendar date (a time, an offset,
+    // or both) - always a specific instant, never date-only.
+    return { epochMs: isoCandidate, iso: formatDate(isoCandidate, timezone), hasTime: true }
   }
 
   const lower = trimmed.toLowerCase()
@@ -319,7 +340,7 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
     if (epochMs === null) {
       throw parseError(input)
     }
-    return { epochMs, iso: formatDate(epochMs, timezone) }
+    return { epochMs, iso: formatDate(epochMs, timezone), hasTime: hourStr !== undefined }
   }
 
   const nextLast = lower.match(/^(next|last)\s+([a-z]+)$/)
@@ -343,7 +364,7 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
     if (epochMs === null) {
       throw parseError(input)
     }
-    return { epochMs, iso: formatDate(epochMs, timezone) }
+    return { epochMs, iso: formatDate(epochMs, timezone), hasTime: false }
   }
 
   const relative = lower.match(/^in\s+(\d+)\s+(minutes?|hours?|days?|weeks?)$/)
@@ -381,13 +402,19 @@ export function resolveDate(input: string | number, opts: ResolveDateOptions): R
       if (epochMs === null) {
         throw parseError(input)
       }
-      return { epochMs, iso: formatDate(epochMs, timezone) }
+      // No time-of-day syntax exists for this form ("in 3 days" cannot
+      // carry an "at 17:00"): `hasTime` is false even though the computed
+      // instant happens to preserve now's wall-clock time (needed to stay
+      // DST-safe, not to express a caller-chosen time of day).
+      return { epochMs, iso: formatDate(epochMs, timezone), hasTime: false }
     }
     // Elapsed-time units (hours/minutes): raw millisecond addition is
     // correct here, since "2 hours" means 7,200,000 ms of elapsed time
-    // regardless of any DST boundary crossed in between.
+    // regardless of any DST boundary crossed in between. Unlike the
+    // calendar-unit branch above, this genuinely is about a specific
+    // instant, so `hasTime` is true.
     const epochMs = now.getTime() + sign * amount * unitMs
-    return { epochMs, iso: formatDate(epochMs, timezone) }
+    return { epochMs, iso: formatDate(epochMs, timezone), hasTime: true }
   }
 
   throw parseError(input)

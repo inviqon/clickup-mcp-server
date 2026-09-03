@@ -196,6 +196,64 @@ describe('resolveDate', () => {
   })
 })
 
+describe('resolveDate hasTime', () => {
+  // The flag `clickup_create_task`/`clickup_update_task` use to decide
+  // whether to set ClickUp's `due_date_time`/`start_date_time`: without it,
+  // ClickUp silently truncates a due date to the start of its own day even
+  // when the caller asked for a specific time (observed live: "tomorrow
+  // 17:00" came back as "04:00"). Extended onto `resolveDate`'s own return
+  // value (rather than re-parsed at the tool layer) precisely so the tool
+  // layer never has to duplicate this grammar's rules about which forms
+  // carry a time.
+  it('is false for a bare "tomorrow"', () => {
+    expect(resolveDate('tomorrow', { timezone: tz, now }).hasTime).toBe(false)
+  })
+
+  it('is true for "tomorrow 17:00"', () => {
+    expect(resolveDate('tomorrow 17:00', { timezone: tz, now }).hasTime).toBe(true)
+  })
+
+  it('is false for a bare "today"', () => {
+    expect(resolveDate('today', { timezone: tz, now }).hasTime).toBe(false)
+  })
+
+  it('is true for "yesterday 08:30"', () => {
+    expect(resolveDate('yesterday 08:30', { timezone: tz, now }).hasTime).toBe(true)
+  })
+
+  it('is false for a bare ISO date', () => {
+    expect(resolveDate('2026-09-05', { timezone: tz, now }).hasTime).toBe(false)
+  })
+
+  it('is true for an ISO date carrying a time', () => {
+    expect(resolveDate('2026-09-05T14:00', { timezone: tz, now }).hasTime).toBe(true)
+  })
+
+  it('is true for an ISO string carrying an explicit offset', () => {
+    expect(resolveDate('2026-09-05T14:00:00+02:00', { timezone: tz, now }).hasTime).toBe(true)
+  })
+
+  it('is true for a raw epoch number', () => {
+    expect(resolveDate(1756803600000, { timezone: tz, now }).hasTime).toBe(true)
+  })
+
+  it('is true for a numeric-string epoch', () => {
+    expect(resolveDate('1756803600000', { timezone: tz, now }).hasTime).toBe(true)
+  })
+
+  it('is false for "next monday" - no time syntax exists for this form', () => {
+    expect(resolveDate('next monday', { timezone: tz, now }).hasTime).toBe(false)
+  })
+
+  it('is false for "in 3 days" - a calendar-unit relative form', () => {
+    expect(resolveDate('in 3 days', { timezone: tz, now }).hasTime).toBe(false)
+  })
+
+  it('is true for "2 hours ago" - an elapsed-time relative form', () => {
+    expect(resolveDate('2 hours ago', { timezone: tz, now }).hasTime).toBe(true)
+  })
+})
+
 describe('parseDuration', () => {
   it.each([
     ['1h30m', 5_400_000],
