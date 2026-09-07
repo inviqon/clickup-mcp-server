@@ -116,6 +116,27 @@ describe('clickup_create_comment', () => {
     expect(out.date).toMatch(/\+02:00/)
   })
 
+  /**
+   * ClickUp returns this endpoint's `id` and `hist_id` as JSON numbers,
+   * not strings. The response schema used to declare `z.string()`, so
+   * every successful write threw "expected string, received number" on
+   * response validation AFTER the comment had already been created -
+   * which reads to a caller as a failed write and invites a retry that
+   * posts a duplicate. The fixtures all use string ids, so nothing caught
+   * it; this test pins the numeric shape ClickUp actually sends.
+   */
+  it('accepts the numeric id and hist_id ClickUp really returns, and reports the id as a string', async () => {
+    mswServer.use(
+      http.post(`${API}/v2/task/${fx.TASK_ID}/comment`, () =>
+        HttpResponse.json({ id: 90120260847208, hist_id: 90120260847209, date: 1568036964079 }),
+      ),
+    )
+    const out = await tool('clickup_create_comment').handler({ task_id: fx.TASK_ID, text: 'Ship it' }, testContext())
+    expect(out.id).toBe('90120260847208')
+    const md = tool('clickup_create_comment').render(out, testContext())
+    expect(md).toBe(`Comment 90120260847208 added to task ${fx.TASK_ID} at ${out.date}.`)
+  })
+
   it('renders the comment id and task it was added to', async () => {
     mswServer.use(...fx.createCommentHandlers())
     const out = await tool('clickup_create_comment').handler({ task_id: fx.TASK_ID, text: 'Ship it' }, testContext())

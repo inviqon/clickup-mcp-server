@@ -506,10 +506,23 @@ export type BulkTimeInStatusRawResponse = z.infer<typeof BulkTimeInStatusRawResp
  * `POST /v2/task/{task_id}/comment`'s own response - a minimal
  * acknowledgement (id, hist_id, date), not a full comment object, unlike
  * `TaskCommentSchema` above which backs both places this server actually
- * reads a comment's full content back. `date` is documented as an integer
- * here, unlike the string form `TaskCommentSchema.date` declares for the
- * list endpoint - accepted as either rather than assumed to match, the
- * same normalisation `TaskCommentSchema.date` applies.
+ * reads a comment's full content back.
+ *
+ * All three fields are declared as string-or-number unions because ClickUp
+ * disagrees with itself about their types on this endpoint. `date` was
+ * always documented as an integer here, unlike the string form
+ * `TaskCommentSchema.date` declares for the list endpoint. `id` turned out
+ * to behave the same way: ClickUp returns it as a JSON number from this
+ * POST while `GET /task/{id}/comment` reports the very same id as a
+ * string, so declaring `z.string()` here rejected every successful write.
+ * `hist_id` is widened alongside it rather than waiting to be bitten by
+ * the identical shape.
+ *
+ * That failure mode is worse than it looks: the comment IS created, and
+ * only the response validation throws. A caller reads the error as "not
+ * written", retries, and posts a duplicate. `createComment`
+ * (src/clickup/endpoints/comments.ts) therefore normalises both ids back
+ * to strings, so nothing downstream has to care which shape arrived.
  *
  * This server previously also had a second, near-identical schema here
  * (`CommentSchema`/`GetCommentsResponseSchema`, added alongside a second
@@ -523,8 +536,8 @@ export type BulkTimeInStatusRawResponse = z.infer<typeof BulkTimeInStatusRawResp
  */
 export const CreateCommentResponseSchema = z
   .object({
-    id: z.string(),
-    hist_id: z.string(),
+    id: z.union([z.string(), z.number()]),
+    hist_id: z.union([z.string(), z.number()]),
     date: z.union([z.string(), z.number()]),
   })
   .passthrough()
