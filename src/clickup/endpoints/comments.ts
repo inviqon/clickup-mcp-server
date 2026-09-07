@@ -20,17 +20,24 @@ export type CreateCommentResult = { id: string; hist_id: string; date: string | 
  * `Partial<T>` result is incompatible with a stricter type under
  * `exactOptionalPropertyTypes`.
  */
-export function createComment(
+export async function createComment(
   ctx: ClickUpContext,
   taskId: string,
   body: Record<string, unknown>,
 ): Promise<CreateCommentResult> {
-  return ctx.client.request({
+  const created = await ctx.client.request({
     method: 'POST',
     path: `/task/${taskId}/comment`,
     schema: CreateCommentResponseSchema,
     body,
   })
+
+  // ClickUp returns `id` and `hist_id` as JSON numbers here, while every
+  // other place this server reads a comment id back reports a string (see
+  // `CreateCommentResponseSchema`). Normalising at this boundary keeps
+  // `CreateCommentResult.id` a plain string, so the tool's output schema
+  // and its rendered line stay unchanged whichever shape arrives.
+  return { id: String(created.id), hist_id: String(created.hist_id), date: created.date }
 }
 
 /**
