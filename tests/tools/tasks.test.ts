@@ -242,7 +242,7 @@ describe('clickup_create_task', () => {
       testContext(),
     )
     expect(typeof body.due_date).toBe('number')
-    expect(tool('clickup_create_task').render(out, testContext())).toContain('+02:00')
+    expect(tool('clickup_create_task').render(out, testContext())).toMatch(/\+0[12]:00/) // tomorrow is CET or CEST, depending on when the test runs
   })
 
   // Bug 2: without `due_date_time`/`start_date_time`, ClickUp silently
